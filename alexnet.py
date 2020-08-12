@@ -11,7 +11,7 @@ import importlib
 import math
 import copy
 
-from src.ar4414.memory_model.pruners.base import BasicPruning
+from base import BasicPruning
 
 import torch
 import torch.nn as nn
@@ -20,7 +20,7 @@ class AlexNetPruning(BasicPruning):
 #{{{
     def __init__(self, params, model):
     #{{{
-        self.fileName = 'alexnet_{}.py'.format(int(params.samplePruning['pruning_perc']))
+        self.fileName = 'alexnet_{}.py'.format(int(params.pruner['pruning_perc']))
         self.netName = 'AlexNet'
         
         super().__init__(params, model)

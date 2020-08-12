@@ -11,7 +11,7 @@ import importlib
 import math
 import copy
 
-from src.ar4414.memory_model.pruners.base import BasicPruning
+from base import BasicPruning
 
 import torch
 import torch.nn as nn
@@ -20,7 +20,7 @@ class SqueezeNetPruning(BasicPruning):
 #{{{
     def __init__(self, params, model):
     #{{{
-        self.fileName = 'squeezenet_{}.py'.format(int(params.samplePruning['pruning_perc']))
+        self.fileName = 'squeezenet_{}.py'.format(int(params.pruner['pruning_perc']))
         self.netName = 'SqueezeNet'
 
         # selects only convs and fc layers 

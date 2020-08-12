@@ -1,22 +1,28 @@
+import os
 import sys
 import csv
-import os
-import numpy as np
 import time
-from tqdm import tqdm
 import json
-import pickle
-import subprocess
-import importlib
 import math
-import functools
 import copy
-
+import pickle
+import functools
+import importlib
+import subprocess
+from tqdm import tqdm
 from abc import ABC, abstractmethod
 
-import src.ar4414.memory_model.pruners.dependencies as dependSrc
-from src.ar4414.memory_model.pruners.model_writers import Writer
-from src.ar4414.memory_model.pruners.weight_transfer import WeightTransferUnit
+# get current directory and append to path
+# this allows everything inside pruners to access anything else 
+# within pruners regardless of where pruners is
+currDir = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(currDir)
+
+import dependencies as dependSrc
+from model_writers import Writer
+from weight_transfer import WeightTransferUnit
+
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -38,7 +44,8 @@ class BasicPruning(ABC):
         self.layerSizes = {}
         
         # create model directory and file
-        dirName = 'models/pruned/{}/{}'.format(params.dataset, params.samplePruning['subset_name'])
+        # dirName = 'models/pruned/{}/{}'.format(params.dataset, params.pruner['subset_name'])
+        dirName = '{}/{}/{}'.format(params.pruner['model_path'], params.dataset, params.pruner['subset_name'])
         self.filePath = os.path.join(dirName, self.fileName)
         
         ## create dir if it doesn't exist
@@ -48,7 +55,8 @@ class BasicPruning(ABC):
         self.depBlock = dependSrc.DependencyBlock(model)
         self.get_layer_params()
 
-        self.importPath = 'src.ar4414.memory_model.{}.{}'.format('.'.join(dirName.split('/')), self.fileName.split('.')[0])
+        # self.importPath = 'src.ar4414.memory_model.{}.{}'.format('.'.join(dirName.split('/')), self.fileName.split('.')[0])
+        self.importPath = '{}.{}.{}'.format('.'.join(params.pruner['project_dir'].split('/')), '.'.join(dirName.split('/')), self.fileName.split('.')[0])
     #}}} 
     
     def get_layer_params(self):
@@ -113,7 +121,8 @@ class BasicPruning(ABC):
     def prune_model(self, model, transferWeights=True):
     #{{{
         # pruning based on l1 norm of weights
-        if self.params.samplePruning['mode'] == 'l1-norm':
+        # if self.params.pruner['mode'] == 'l1-norm':
+        if self.params.pruner['mode'] == 'l1-norm':
             tqdm.write("Pruning filters - Weights")
             channelsPruned = self.structured_l1_weight(model)
             self.write_net()
@@ -122,7 +131,8 @@ class BasicPruning(ABC):
             optimiser = torch.optim.SGD(prunedModel.parameters(), lr=self.params.lr, momentum=self.params.momentum, weight_decay=self.params.weight_decay)
             return channelsPruned, prunedModel, optimiser
         
-        elif self.params.samplePruning['mode'] == 'random':
+        # elif self.params.pruner['mode'] == 'random':
+        elif self.params.pruner['mode'] == 'random':
             channelsPruned = self.random_selection(model)
             self.write_net()
             prunedModel = self.import_pruned_model()
@@ -197,7 +207,8 @@ class BasicPruning(ABC):
         currentPruneRate = 0
         listIdx = 0
         self.currParams = self.totalParams
-        while (currentPruneRate < float(self.params.samplePruning['pruning_perc'])) and (listIdx < len(globalRanking)):
+        # while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
+        while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
             layerName, filterNum, _ = globalRanking[listIdx]
 
             depLayers = []
@@ -338,10 +349,13 @@ class BasicPruning(ABC):
         internalDeps, externalDeps = self.depBlock.get_dependencies()
 
         numChannelsInDependencyGroup = [len(localRanking[k[0]]) for k in externalDeps]
-        if float(self.params.samplePruning['pruning_perc']) >= 50.0:
-            groupPruningLimits = [int(math.ceil(gs * (1.0 - float(self.params.samplePruning['pruning_perc'])/100.0))) for gs in numChannelsInDependencyGroup]
+        # if float(self.params.pruner['pruning_perc']) >= 50.0:
+        if float(self.params.pruner['pruning_perc']) >= 50.0:
+            # groupPruningLimits = [int(math.ceil(gs * (1.0 - float(self.params.pruner['pruning_perc'])/100.0))) for gs in numChannelsInDependencyGroup]
+            groupPruningLimits = [int(math.ceil(gs * (1.0 - float(self.params.pruner['pruning_perc'])/100.0))) for gs in numChannelsInDependencyGroup]
         else:
-            groupPruningLimits = [int(math.ceil(gs * float(self.params.samplePruning['pruning_perc'])/100.0)) for gs in numChannelsInDependencyGroup]
+            # groupPruningLimits = [int(math.ceil(gs * float(self.params.pruner['pruning_perc'])/100.0)) for gs in numChannelsInDependencyGroup]
+            groupPruningLimits = [int(math.ceil(gs * float(self.params.pruner['pruning_perc'])/100.0)) for gs in numChannelsInDependencyGroup]
 
         dependencies = internalDeps + externalDeps
         groupPruningLimits = [2]*len(internalDeps) + groupPruningLimits

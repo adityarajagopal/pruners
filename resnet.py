@@ -15,7 +15,7 @@ from functools import reduce
 import torch
 import torch.nn as nn
 
-from src.ar4414.memory_model.pruners.base import BasicPruning
+from base import BasicPruning
 
 class ResNet20Pruning(BasicPruning):
 #{{{
@@ -441,7 +441,7 @@ class ResNet20PruningDependency(BasicPruning):
 #{{{
     def __init__(self, params, model):  
     #{{{
-        self.fileName = 'resnet{}_{}.py'.format(int(params.depth), int(params.samplePruning['pruning_perc']))
+        self.fileName = 'resnet{}_{}.py'.format(int(params.depth), int(params.pruner['pruning_perc']))
         self.netName = 'ResNet{}'.format(int(params.depth))
         
         super().__init__(params, model)

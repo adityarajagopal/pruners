@@ -1,8 +1,8 @@
 import sys
 
-import src.ar4414.memory_model.pruners.dependencies as dependencies
-import src.ar4414.memory_model.pruners.model_writers as writers
-import src.ar4414.memory_model.pruners.weight_transfer as weight_transfer
+import dependencies as dependencies
+import model_writers as writers
+import weight_transfer as weight_transfer
 
 def check_kwargs(**kwargs): 
 #{{{
