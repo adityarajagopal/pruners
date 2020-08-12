@@ -12,6 +12,7 @@ import subprocess
 from tqdm import tqdm
 from abc import ABC, abstractmethod
 
+# add line to test of submodule update works
 # get current directory and append to path
 # this allows everything inside pruners to access anything else 
 # within pruners regardless of where pruners is
