@@ -44,7 +44,6 @@ class BasicPruning(ABC):
         self.layerSizes = {}
         
         # create model directory and file
-        # dirName = 'models/pruned/{}/{}'.format(params.dataset, params.pruner['subset_name'])
         dirName = '{}/{}/{}'.format(params.pruner['model_path'], params.dataset, params.pruner['subset_name'])
         self.filePath = os.path.join(dirName, self.fileName)
         
@@ -55,7 +54,6 @@ class BasicPruning(ABC):
         self.depBlock = dependSrc.DependencyBlock(model)
         self.get_layer_params()
 
-        # self.importPath = 'src.ar4414.memory_model.{}.{}'.format('.'.join(dirName.split('/')), self.fileName.split('.')[0])
         self.importPath = '{}.{}.{}'.format('.'.join(params.pruner['project_dir'].split('/')), '.'.join(dirName.split('/')), self.fileName.split('.')[0])
     #}}} 
     
