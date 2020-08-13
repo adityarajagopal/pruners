@@ -10,12 +10,12 @@ Pruning a Custom Network
 
 Mandatory section in config (.ini) file
 ---------------------------------------
-[pruner]
-project_dir: path to top level directory (it is sufficient to start path at the src/ directory) 
-model_path: path inside the top level directory defining where to store models 
-subset_name: name of sub-classes of original dataset
-mode: type of pruning strategy (current options are 'random' and 'l1-norm')
-pruning_perc: percentage of network to prune (can be a list of pruning levels as well)
+- [pruner]
+    * project_dir: path to top level directory (it is sufficient to start path at the src/ directory) 
+    * model_path: path inside the top level directory defining where to store models 
+    * subset_name: name of sub-classes of original dataset
+    * mode: type of pruning strategy (current options are 'random' and 'l1-norm')
+    * pruning_perc: percentage of network to prune (can be a list of pruning levels as well)
 > Models will be stored to {project_dir}/{model_path}/{dataset}/{subset_name}/{net_name}\_{pruning_level}.py
 
 Pruning the above structural modules / networks but with own model description file
