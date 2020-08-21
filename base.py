@@ -119,7 +119,6 @@ class BasicPruning(ABC):
     def prune_model(self, model, transferWeights=True):
     #{{{
         # pruning based on l1 norm of weights
-        # if self.params.pruner['mode'] == 'l1-norm':
         if self.params.pruner['mode'] == 'l1-norm':
             tqdm.write("Pruning filters - Weights")
             channelsPruned = self.structured_l1_weight(model)
@@ -129,11 +128,11 @@ class BasicPruning(ABC):
             optimiser = torch.optim.SGD(prunedModel.parameters(), lr=self.params.lr, momentum=self.params.momentum, weight_decay=self.params.weight_decay)
             return channelsPruned, prunedModel, optimiser
         
-        # elif self.params.pruner['mode'] == 'random':
         elif self.params.pruner['mode'] == 'random':
             channelsPruned = self.random_selection(model)
             self.write_net()
             prunedModel = self.import_pruned_model()
+            prunedModel = self.transfer_weights(model, prunedModel)
             pruneRate, prunedSize, origSize = self.prune_rate(prunedModel)
             print('Pruned Percentage = {:.2f}%, NewModelSize = {:.2f}MB, OrigModelSize = {:.2f}MB'.format(pruneRate, prunedSize, origSize))
             return channelsPruned, prunedModel, None
@@ -398,7 +397,7 @@ class BasicPruning(ABC):
         
         pModStateDict = pModel.state_dict() 
 
-        self.wtu = WeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock)
+        self.wtu = WeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
         for n,m in oModel.named_modules(): 
             # detect dependent modules and convs
             if any(n == x for x in lNames):

@@ -17,7 +17,7 @@ class Writer(object):
 
         self.returnStatement = "return {}.squeeze(2).squeeze(2)" if 'squeezenet' == self.netName.lower() else "return {}"
         
-        baseWriters = {'basic': nn_conv2d, 'relu': nn_relu, 'maxpool2d':nn_maxpool2d, 'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d, 'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear, 'logsoftmax': nn_logsoftmax}
+        baseWriters = {'basic': nn_conv2d, 'relu': nn_relu, 'relu6': nn_relu6, 'maxpool2d':nn_maxpool2d, 'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d, 'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear, 'logsoftmax': nn_logsoftmax}
         if hasattr(self, 'writers'):
             self.writers.update(baseWriters)
         else:
@@ -116,6 +116,11 @@ def nn_conv2d(writer, modName, module, dw=False):
 def nn_relu(writer, modName, module): 
 #{{{
     writer.toWrite['forward'].append('\t\t{} = F.relu({})'.format(writer.forVar, writer.forVar)) 
+#}}}
+
+def nn_relu6(writer, modName, module): 
+#{{{
+    writer.toWrite['forward'].append('\t\t{} = F.relu6({})'.format(writer.forVar, writer.forVar)) 
 #}}}
 
 def nn_maxpool2d(writer, modName, module): 
@@ -294,7 +299,8 @@ def mb_conv(writer, modName, module):
         elif isinstance(m, nn.BatchNorm2d): 
             nn_batchnorm2d(writer, fullName, m)
             if writer.convIdx == 0 or writer.convIdx == 1: 
-                nn_relu(writer, fullName, m)
+                # nn_relu(writer, fullName, m)
+                nn_relu6(writer, fullName, m)
     #}}}
     
     def residual_branch(n, m, fullName, writer, ipToBlock, opOfBlock): 

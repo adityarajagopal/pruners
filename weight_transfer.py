@@ -8,15 +8,16 @@ import torch.nn as nn
 
 class WeightTransferUnit(object): 
 #{{{
-    def __init__(self, prunedModel, channelsPruned, depBlk): 
+    def __init__(self, prunedModel, channelsPruned, depBlk, layerSizes): 
     #{{{
+        self.layerSizes = layerSizes
         self.channelsPruned = channelsPruned
         self.depBlk = depBlk
         self.pModel = prunedModel
-        
+
         self.ipChannelsPruned = []
 
-        baseMods = {'basic': nn_conv2d, 'relu': nn_relu, 'maxpool2d':nn_maxpool2d, 'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d, 'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear, 'logsoftmax': nn_logsoftmax}
+        baseMods = {'basic': nn_conv2d, 'relu': nn_relu, 'relu6': nn_relu6, 'maxpool2d':nn_maxpool2d, 'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d, 'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear, 'logsoftmax': nn_logsoftmax}
         if hasattr(self, 'wtFuncs'):
             self.wtFuncs.update(baseMods)
         else:
@@ -54,6 +55,8 @@ def nn_conv2d(wtu, modName, module, ipChannelsPruned=None, opChannelsPruned=None
     wtu.pModel[pWeight] = module._parameters['weight'][opChannels,:][:,ipChannels]
     if module._parameters['bias'] is not None:
         wtu.pModel[pBias] = module._parameters['bias'][opChannels]
+
+    wtu.prevLayer = modName
 #}}}
 
 def nn_batchnorm2d(wtu, modName, module): 
@@ -70,15 +73,36 @@ def nn_batchnorm2d(wtu, modName, module):
 
 def nn_linear(wtu, modName, module): 
 #{{{
-    allIpChannels = list(range(module.in_features))
+    inFeatures = wtu.layerSizes[modName][1]
+    prevOutChannels = wtu.layerSizes[wtu.prevLayer][0]
+    spatialSize = int(inFeatures / prevOutChannels)
+
+    allIpChannels = list(range(int(module.in_features/spatialSize)))
     ipChannelsKept = list(set(allIpChannels) - set(wtu.ipChannelsPruned))
     
     key = 'module.{}'.format('_'.join(modName.split('.')[1:]))
-    wtu.pModel['{}.weight'.format(key)] = module._parameters['weight'][:,ipChannelsKept]
+    # allIpChannels = list(range(module.in_features))
+    # ipChannelsKept = list(set(allIpChannels) - set(wtu.ipChannelsPruned))
+    # wtu.pModel['{}.weight'.format(key)] = module._parameters['weight'][:,ipChannelsKept]
+    for i,channel in enumerate(ipChannelsKept):
+        sOrig = spatialSize * channel
+        eOrig = sOrig + spatialSize
+        sPrune = spatialSize * i
+        ePrune = sPrune + spatialSize
+        wtu.pModel['{}.weight'.format(key)][:,sPrune:ePrune] = module._parameters['weight'][:,sOrig:eOrig]
+    
     wtu.pModel['{}.bias'.format(key)] = module._parameters['bias']
+
+    wtu.ipChannelsPruned = []
+    wtu.prevLayer = modName
 #}}}
 
 def nn_relu(wtu, modName, module): 
+#{{{
+    pass
+#}}}
+
+def nn_relu6(wtu, modName, module): 
 #{{{
     pass
 #}}}

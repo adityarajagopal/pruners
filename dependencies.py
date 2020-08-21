@@ -430,29 +430,80 @@ class DependencyBlock(object):
         """
         linkedConvModules = []
         linkedModules = []
-        for n,m in self.model.module.named_children(): 
-            if not DependencyBlock.check_children(m, self.instances):
-                name = "module.{}".format(n)
-                if isinstance(m, nn.Conv2d):
-                    linkedConvModules.append(('basic', name))
-                    linkedModules.append((name, 'basic', m))
+            
+        parentModule = None
+        for n,m in self.model.named_modules(): 
+            if DependencyBlock.check_inst(m, self.instances):
+                parentModule = n
+                idx = self.instances.index(type(m))
+                mType = self.types[idx]
+                linkedConvModules.append((mType, n))
+                linkedModules.append((n, mType, m))
 
-                elif isinstance(m, nn.Linear): 
-                    linkedModules.append((name, 'linear', m))
-            else:
-                for _n,_m in m.named_modules():
-                    if DependencyBlock.check_inst(_m, self.instances):
-                        if _n is not '':
-                            name = "module.{}.{}".format(n,_n)
-                        else:
-                            name = "module.{}".format(n)
-                        idx = self.instances.index(type(_m))
-                        mType = self.types[idx]
-                        linkedConvModules.append((mType, name))
-                        linkedModules.append((name, mType, _m))
+            elif isinstance(m, nn.Conv2d):
+                if parentModule is None or parentModule not in n:
+                    linkedConvModules.append(('basic', n))
+                    linkedModules.append((n, 'basic', m))
+
+            elif isinstance(m, nn.Linear): 
+                if parentModule is None or parentModule not in n:
+                    linkedModules.append((n, 'linear', m))
+
+        # for n,m in self.model.module.named_children(): 
+        #     if not DependencyBlock.check_children(m, self.instances):
+        #         name = "module.{}".format(n)
+        #         if isinstance(m, nn.Conv2d):
+        #             linkedConvModules.append(('basic', name))
+        #             linkedModules.append((name, 'basic', m))
+
+        #         elif isinstance(m, nn.Linear): 
+        #             linkedModules.append((name, 'linear', m))
+        #     else:
+        #         for _n,_m in m.named_modules():
+        #             if DependencyBlock.check_inst(_m, self.instances):
+        #                 if _n is not '':
+        #                     name = "module.{}.{}".format(n,_n)
+        #                 else:
+        #                     name = "module.{}".format(n)
+        #                 idx = self.instances.index(type(_m))
+        #                 mType = self.types[idx]
+        #                 linkedConvModules.append((mType, name))
+        #                 linkedModules.append((name, mType, _m))
         
         return linkedConvModules, linkedModules
     #}}}
+    
+    # def create_modules_graph(self): 
+    # #{{{
+    #     """
+    #     Returns a list which has order of modules which have an instance of module in instances in the entire network
+    #     eg. conv1 -> module1(which has as an mb_conv) -> conv2 -> module2 ...    
+    #     """
+    #     linkedConvModules = []
+    #     linkedModules = []
+    #     for n,m in self.model.module.named_children(): 
+    #         if not DependencyBlock.check_children(m, self.instances):
+    #             name = "module.{}".format(n)
+    #             if isinstance(m, nn.Conv2d):
+    #                 linkedConvModules.append(('basic', name))
+    #                 linkedModules.append((name, 'basic', m))
+
+    #             elif isinstance(m, nn.Linear): 
+    #                 linkedModules.append((name, 'linear', m))
+    #         else:
+    #             for _n,_m in m.named_modules():
+    #                 if DependencyBlock.check_inst(_m, self.instances):
+    #                     if _n is not '':
+    #                         name = "module.{}.{}".format(n,_n)
+    #                     else:
+    #                         name = "module.{}".format(n)
+    #                     idx = self.instances.index(type(_m))
+    #                     mType = self.types[idx]
+    #                     linkedConvModules.append((mType, name))
+    #                     linkedModules.append((name, mType, _m))
+    #     
+    #     return linkedConvModules, linkedModules
+    # #}}}
 
     def create_layer_graph(self, linkedModulesWithFc): 
     #{{{
