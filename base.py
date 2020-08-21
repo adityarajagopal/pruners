@@ -290,10 +290,10 @@ class BasicPruning(ABC):
         internalDeps, externalDeps = self.depBlock.get_dependencies()
         
         numChannelsInDependencyGroup = [len(localRanking[k[0]]) for k in externalDeps]
-        if self.params.pruningPerc >= 50.0:
-            groupPruningLimits = [int(math.ceil(gs * (1.0 - self.params.pruningPerc/100.0))) for gs in numChannelsInDependencyGroup]
+        if float(self.params.pruner['pruning_perc']) >= 50.0:
+            groupPruningLimits = [int(math.ceil(gs * (1.0 - float(self.params.pruner['pruning_perc'])/100.0))) for gs in numChannelsInDependencyGroup]
         else:
-            groupPruningLimits = [int(math.ceil(gs * self.params.pruningPerc/100.0)) for gs in numChannelsInDependencyGroup]
+            groupPruningLimits = [int(math.ceil(gs * float(self.params.pruner['pruning_perc'])/100.0)) for gs in numChannelsInDependencyGroup]
 
         dependencies = internalDeps + externalDeps
         groupPruningLimits = [2]*len(internalDeps) + groupPruningLimits
@@ -346,12 +346,9 @@ class BasicPruning(ABC):
         internalDeps, externalDeps = self.depBlock.get_dependencies()
 
         numChannelsInDependencyGroup = [len(localRanking[k[0]]) for k in externalDeps]
-        # if float(self.params.pruner['pruning_perc']) >= 50.0:
         if float(self.params.pruner['pruning_perc']) >= 50.0:
-            # groupPruningLimits = [int(math.ceil(gs * (1.0 - float(self.params.pruner['pruning_perc'])/100.0))) for gs in numChannelsInDependencyGroup]
             groupPruningLimits = [int(math.ceil(gs * (1.0 - float(self.params.pruner['pruning_perc'])/100.0))) for gs in numChannelsInDependencyGroup]
         else:
-            # groupPruningLimits = [int(math.ceil(gs * float(self.params.pruner['pruning_perc'])/100.0)) for gs in numChannelsInDependencyGroup]
             groupPruningLimits = [int(math.ceil(gs * float(self.params.pruner['pruning_perc'])/100.0)) for gs in numChannelsInDependencyGroup]
 
         dependencies = internalDeps + externalDeps
