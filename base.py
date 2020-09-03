@@ -120,7 +120,7 @@ class BasicPruning(ABC):
     #{{{
         # pruning based on l1 norm of weights
         if self.params.pruner['mode'] == 'l1-norm':
-            tqdm.write("Pruning filters - Weights")
+            tqdm.write("Pruning filters: l1-norm")
             channelsPruned = self.structured_l1_weight(model)
             self.write_net()
             prunedModel = self.import_pruned_model()
@@ -129,13 +129,15 @@ class BasicPruning(ABC):
             return channelsPruned, prunedModel, optimiser
         
         elif self.params.pruner['mode'] == 'random':
+            tqdm.write("Pruning filters: random")
             channelsPruned = self.random_selection(model)
             self.write_net()
             prunedModel = self.import_pruned_model()
             prunedModel = self.transfer_weights(model, prunedModel)
             pruneRate, prunedSize, origSize = self.prune_rate(prunedModel)
             print('Pruned Percentage = {:.2f}%, NewModelSize = {:.2f}MB, OrigModelSize = {:.2f}MB'.format(pruneRate, prunedSize, origSize))
-            return channelsPruned, prunedModel, None
+            optimiser = torch.optim.SGD(prunedModel.parameters(), lr=self.params.lr, momentum=self.params.momentum, weight_decay=self.params.weight_decay)
+            return channelsPruned, prunedModel, optimiser
      #}}}
         
     def non_zero_argmin(self, array): 
