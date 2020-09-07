@@ -115,12 +115,12 @@ def nn_conv2d(writer, modName, module, dw=False):
 
 def nn_relu(writer, modName, module): 
 #{{{
-    writer.toWrite['forward'].append('\t\t{} = F.relu({})'.format(writer.forVar, writer.forVar)) 
+    writer.toWrite['forward'].append('\t\t{} = F.relu({}, inplace=True)'.format(writer.forVar, writer.forVar)) 
 #}}}
 
 def nn_relu6(writer, modName, module): 
 #{{{
-    writer.toWrite['forward'].append('\t\t{} = F.relu6({})'.format(writer.forVar, writer.forVar)) 
+    writer.toWrite['forward'].append('\t\t{} = F.relu6({}, inplace=True)'.format(writer.forVar, writer.forVar)) 
 #}}}
 
 def nn_maxpool2d(writer, modName, module): 
@@ -280,7 +280,7 @@ def residual(writer, modName, module):
 
     def aggregation_op(writer, node1, node2):
     #{{{
-        forward = '\t\t{} = F.relu({} + {})'.format(writer.forVar, node1, node2)
+        forward = '\t\t{} = F.relu({} + {}, inplace=True)'.format(writer.forVar, node1, node2)
         writer.toWrite['forward'].append(forward)
     #}}}
     
