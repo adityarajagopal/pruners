@@ -132,7 +132,6 @@ class BasicPruning(ABC):
         
         elif self.params.pruner['mode'] == 'random':
             tqdm.write("Pruning filters: random")
-            breakpoint()
             channelsPruned = self.random_selection(model)
             self.write_net()
             prunedModel = self.import_pruned_model()
@@ -380,10 +379,9 @@ class BasicPruning(ABC):
                 self.writer.write_module(lType, n, m)
             
             # ignore recursion into dependent modules
-            # elif any(x in n for t,x in self.depBlock.linkedModules):
-            elif any(x == n for t,x in self.depBlock.linkedModules):
+            elif any(f'{x}.' in n for t,x in self.depBlock.linkedModules):
                 continue
-            
+
             # all other modules in the network
             else:
                 try: 
@@ -409,8 +407,7 @@ class BasicPruning(ABC):
                 self.wtu.transfer_weights(lType, n, m)
             
             # ignore recursion into dependent modules
-            # elif any(x in n for t,x in self.depBlock.linkedModules):
-            elif any(x == n for t,x in self.depBlock.linkedModules):
+            elif any(f'{x}.' in n for t,x in self.depBlock.linkedModules):
                 continue
             
             # all other modules in the network
@@ -420,6 +417,8 @@ class BasicPruning(ABC):
                 except KeyError:
                     print("CRITICAL WARNING : layer found ({}) that is not handled in writers. This could potentially break the network.".format(type(m)))
         
+        # print(self.depBlock.linkedModules)
+        # breakpoint()
         pModel.load_state_dict(pModStateDict)
         return pModel 
     #}}}

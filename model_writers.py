@@ -101,6 +101,7 @@ class Writer(object):
 def nn_conv2d(writer, modName, module, dw=False): 
 #{{{
     # print(dw, module.groups, writer.currIpChannels, writer.layerSizes[modName][1])
+    dw = dw or (module.in_channels == module.groups)
     writer.currIpChannels = writer.layerSizes[modName][1] if not dw else writer.currIpChannels
     module.in_channels = writer.currIpChannels 
     if dw:
@@ -325,11 +326,8 @@ def mb_conv(writer, modName, module):
     
     idx = writer.depBlk.instances.index(type(module))
     midConv = writer.depBlk.convs[idx][1] 
-    stride = module._modules[midConv].stride[0]
-    # if stride == 2: 
-    #     residual_backbone(writer, modName, module, main_branch, None, None)
-    # else:
-    #     residual_backbone(writer, modName, module, main_branch, residual_branch, aggregation_op)
+    # stride = module._modules[midConv].stride[0]
+    stride = dict(module.named_modules())[midConv].stride[0]
     
     residual = any(x in y for y in dict(module.named_modules()).keys() for x in writer.depBlk.dsLayers[idx]) 
     if residual:

@@ -251,7 +251,7 @@ class MBConv(DependencyCalculator):
                     idx = convs.index(n)
                     if idx != len(convs)-1:
                         nextConv = "{}.{}".format(name, convs[idx+1])
-                        groups = module._modules[convs[idx+1]].groups
+                        groups = dict(module.named_modules())[convs[idx+1]].groups
                         nextLayers[_n] = [(nextConv, groups)]
                     else:
                         nextLayers[_n] = []
@@ -272,7 +272,7 @@ class MBConv(DependencyCalculator):
    
     def get_interface_layers(self, name, module, convs, ds): 
     #{{{
-        interfaceLayers = [("{}.{}".format(name, convs[0]), module._modules[convs[0]].groups)]
+        interfaceLayers = [("{}.{}".format(name, convs[0]), dict(module.named_modules())[convs[0]].groups)]
         
         # only want first ds layer as this is the interface layer
         # assumption ds layers are listed in order --> ds[0]
@@ -572,6 +572,13 @@ class DependencyBlock(object):
                     if len(tmpDeps) != 0:
                         extDeps.append(tmpDeps)
                     tmpDeps = []
+            
+            elif isinstance(m, nn.Conv2d): 
+                if m.in_channels == m.groups: 
+                    layers = dict(self.model.named_modules())
+                    layerNames = list(layers.keys())
+                    prevLayerName = [k for k,v in self.linkedConvs.items() if v[0][0] == n][0]
+                    extDeps.append([prevLayerName, n])
         
         if len(tmpDeps) != 0: 
             extDeps.append(tmpDeps)

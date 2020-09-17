@@ -42,6 +42,7 @@ class WeightTransferUnit(object):
 # torch.nn modules
 def nn_conv2d(wtu, modName, module, ipChannelsPruned=None, opChannelsPruned=None, dw=False): 
 #{{{
+    dw = dw or (module.in_channels == module.groups)
     allIpChannels = list(range(module.in_channels))
     allOpChannels = list(range(module.out_channels))
     ipPruned = wtu.ipChannelsPruned if ipChannelsPruned is None else ipChannelsPruned
@@ -229,7 +230,8 @@ def mb_conv(wtu, modName, module):
     
     idx = wtu.depBlk.instances.index(type(module))
     midConv = wtu.depBlk.convs[idx][1] 
-    stride = module._modules[midConv].stride[0]
+    # stride = module._modules[midConv].stride[0]
+    stride = dict(module.named_modules())[midConv].stride[0]
     if stride == 2: 
         residual_backbone(wtu, modName, module, main_branch, None, None)
     else:
