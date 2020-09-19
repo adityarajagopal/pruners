@@ -14,19 +14,7 @@ def check_kwargs(**kwargs):
         sys.exit()
 #}}}
 
-def basic_block(**kwargs):
-#{{{
-    def decorator(block): 
-        check_kwargs(**kwargs)
-        dependencies.DependencyBlock.update_block_names(block, **kwargs)
-        dependencies.DependencyBlock.register_dependency_calculator(kwargs['lType'], dependencies.Residual())
-        writers.Writer.register_writer(kwargs['lType'], writers.residual)
-        weight_transfer.WeightTransferUnit.register_transfer_func(kwargs['lType'], weight_transfer.residual)
-        return block
-    return decorator
-#}}}
-
-def bottleneck(**kwargs):
+def residual(**kwargs):
 #{{{
     def decorator(block): 
         check_kwargs(**kwargs)
@@ -58,6 +46,18 @@ def fire(**kwargs):
         dependencies.DependencyBlock.register_dependency_calculator(kwargs['lType'], dependencies.Fire())
         writers.Writer.register_writer(kwargs['lType'], writers.fire)
         weight_transfer.WeightTransferUnit.register_transfer_func(kwargs['lType'], weight_transfer.fire)
+        return block
+    return decorator
+#}}}
+
+def inception(**kwargs):
+#{{{
+    def decorator(block): 
+        check_kwargs(**kwargs)
+        dependencies.DependencyBlock.update_block_names(block, **kwargs)
+        dependencies.DependencyBlock.register_dependency_calculator(kwargs['lType'], dependencies.Inception())
+        writers.Writer.register_writer(kwargs['lType'], writers.inception)
+        weight_transfer.WeightTransferUnit.register_transfer_func(kwargs['lType'], weight_transfer.inception)
         return block
     return decorator
 #}}}

@@ -276,3 +276,56 @@ def fire(wtu, modName, module):
             split_and_aggregate_backbone(wtu, modName, module, convs[1:], [basic,basic], aggregation_op)
             break
 #}}}
+
+def split_and_aggregate_backbone_new(wtu, parentModName, parentModule, branchStarts, branchProcs, aggregation_op): 
+#{{{
+    assert len(branchStarts) == len(branchProcs), 'For each branch a processing function must be provided - branches = {}, procFuns = {}'.format(len(branchConvs), len(branchProcs))
+
+    inputToBlock = wtu.ipChannelsPruned
+
+    branchOpChannels = []
+    opNodes = None
+            
+    # for idx in range(len(branchStarts)):
+    for idx, branchName in enumerate(branchStarts):
+        wtu.ipChannelsPruned = inputToBlock
+        fullName = "{}.{}".format(parentModName, branchName)
+        branchProcs[idx](wtu, fullName, dict(parentModule.named_modules())[branchName])
+        branchOpChannels.append(wtu.ipChannelsPruned)
+
+    if aggregation_op is not None:
+        aggregation_op(wtu, opNodes, branchOpChannels)  
+#}}}
+
+def inception(wtu, modName, module): 
+#{{{
+    wtu.totalOutChannels = []
+    def basic(wtu, fullName, module): 
+    #{{{
+        for n,m in module.named_modules():
+            name = f"{fullName}.{n}"	 	
+            if isinstance(m, nn.Conv2d): 
+                # check if next layer is still within the same branch
+                # only append to out channels if it is an exit layer of the branch
+                # TODO: Incorporate this as a dependency block function
+                nextLayers = wtu.depBlk.linkedConvAndFc[name]
+                if not all(f'{fullName}.' in x[0] for x in nextLayers):
+                    wtu.totalOutChannels.append(m.out_channels)
+                nn_conv2d(wtu, name, m)
+
+            if isinstance(m, nn.BatchNorm2d): 
+                nn_batchnorm2d(wtu, name, m)
+    #}}}
+
+    def aggregation_op(wtu, opNodes, branchOpChannels): 
+    #{{{
+        offsets = [0] + list(np.cumsum(wtu.totalOutChannels))[:-1]
+        prunedChannels = [list(offsets[i] + np.array(x)) for i,x in enumerate(branchOpChannels)]    
+        prunedChannels = list(itertools.chain.from_iterable(prunedChannels))
+        wtu.ipChannelsPruned = prunedChannels
+    #}}}
+    
+    idx = wtu.depBlk.instances.index(type(module))
+    convs = wtu.depBlk.convs[idx]
+    split_and_aggregate_backbone_new(wtu, modName, module, convs, [basic,basic,basic,basic], aggregation_op)
+#}}}

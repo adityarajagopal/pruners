@@ -1,4 +1,5 @@
 import sys
+import copy
 
 import torch.nn as nn
     
@@ -15,6 +16,7 @@ class Writer(object):
         self.modelDesc = open(modelFile, 'w+')
         self.layerSizes = layerSizes
 
+        self.useCount = False 
         self.returnStatement = "return {}.squeeze(2).squeeze(2)" if 'squeezenet' == self.netName.lower() else "return {}"
         
         baseWriters = {'basic': nn_conv2d, 'relu': nn_relu, 'relu6': nn_relu6, 'maxpool2d':nn_maxpool2d, 'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d, 'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear, 'logsoftmax': nn_logsoftmax}
@@ -152,8 +154,12 @@ def nn_batchnorm2d(writer, modName, module):
 
 def nn_linear(writer, modName, module): 
 #{{{
-    # module.in_features = writer.currIpChannels
-    module.in_features = writer.layerSizes[modName][1] 
+    if writer.useCount:
+        # needed in the case of googlenet where concatenation means
+        # layerSizes is incorrect for FC
+        module.in_features = writer.currIpChannels
+    else:
+        module.in_features = writer.layerSizes[modName][1] 
     
     writer.write_module_desc(modName, module)
     
@@ -215,7 +221,7 @@ def residual_backbone(writer, modName, module, main_branch, residual_branch, agg
 
 def split_and_aggregate_backbone(writer, parentModName, parentModule, branchStarts, branchProcs, aggregation_op): 
 #{{{
-    assert len(branchStarts) == len(branchProcs), 'For each branch a processing function must be provided - branches = {}, procFuns = {}'.format(len(branchConvs), len(branchProcs))
+    assert len(branchStarts) == len(branchProcs), 'For each branch a processing function must be provided - branches = {}, procFuns = {}'.format(len(branchStarts), len(branchProcs))
 
     inputToBlock = writer.currIpChannels
     forVarBkp = writer.forVar
@@ -244,7 +250,7 @@ def split_and_aggregate_backbone(writer, parentModName, parentModule, branchStar
         
         branchOpChannels.append(writer.currIpChannels)
         writer.forVar = forVarBkp
-
+	
     if aggregation_op is not None:
         aggregation_op(writer, opNodes, branchOpChannels)  
 #}}}
@@ -373,4 +379,63 @@ def fire(writer, modName, module):
             nn_relu(writer, fullName, m)     
             split_and_aggregate_backbone(writer, modName, module, convs[1:], [basic,basic], aggregation_op)
             break
+#}}}
+
+def split_and_aggregate_backbone_new(writer, parentModName, parentModule, branchStarts, branchProcs, aggregation_op): 
+#{{{
+    assert len(branchStarts) == len(branchProcs), 'For each branch a processing function must be provided - branches = {}, procFuns = {}'.format(len(branchStarts), len(branchProcs))
+
+    inputToBlock = writer.currIpChannels
+    forVarBkp = writer.forVar
+
+    branchOpChannels = []
+    opNodes = []
+            
+    for idx, branchName in enumerate(branchStarts):
+        branchVar = "{}_{}".format(writer.forVar, idx)
+        opNodes.append(branchVar)
+        writer.toWrite['forward'].append("\t\t{} = {}".format(branchVar, writer.forVar))
+        writer.forVar = branchVar
+        writer.currIpChannels = inputToBlock
+
+        fullName = "{}.{}".format(parentModName, branchName)
+        branchProcs[idx](writer, fullName, dict(parentModule.named_modules())[branchName])
+        
+        branchOpChannels.append(writer.currIpChannels)
+        writer.forVar = forVarBkp
+	
+    if aggregation_op is not None:
+        aggregation_op(writer, opNodes, branchOpChannels)  
+#}}}
+
+def inception(writer, modName, module): 
+#{{{
+    def basic(writer, fullName, module): 
+    #{{{
+        for n,m in module.named_modules():
+            if isinstance(m, nn.Conv2d): 
+                nn_conv2d(writer, f"{fullName}.{n}", m)
+
+            if isinstance(m, nn.BatchNorm2d): 
+                nn_batchnorm2d(writer, f"{fullName}.{n}", m)
+            
+            if isinstance(m, nn.ReLU): 
+                nn_relu(writer, f"{fullName}.{n}", m)
+
+            if isinstance(m, nn.MaxPool2d): 
+                nn_maxpool2d(writer, f"{fullName}.{n}", m)
+    #}}}
+
+    def aggregation_op(writer, opNodes, branchOpChannels): 
+    #{{{
+        writer.currIpChannels = sum(branchOpChannels)
+        nodes = "[{}]".format(','.join(opNodes))
+        writer.toWrite['forward'].append("\t\t{} = torch.cat({}, 1)".format(writer.forVar, nodes))
+    #}}}
+    
+    writer.useCount = True
+    inputToBlock = writer.currIpChannels
+    idx = writer.depBlk.instances.index(type(module))
+    convs = copy.deepcopy(writer.depBlk.convs[idx])
+    split_and_aggregate_backbone_new(writer, modName, module, convs, [basic,basic,basic,basic], aggregation_op)
 #}}}

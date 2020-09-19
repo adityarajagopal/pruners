@@ -153,7 +153,7 @@ class BasicPruning(ABC):
         self.layerSizes[lParam][0] -= 1 
         
         nextLayerDetails = self.depBlock.linkedConvAndFc[lParam]
-        for nextLayer, groups in nextLayerDetails:
+        for (nextLayer, groups) in nextLayerDetails:
             nextLayerSize = self.layerSizes[nextLayer]
             currLayerSize = self.layerSizes[lParam]
             paramsPruned = currLayerSize[1]*currLayerSize[2]*currLayerSize[3]
@@ -208,7 +208,6 @@ class BasicPruning(ABC):
         currentPruneRate = 0
         listIdx = 0
         self.currParams = self.totalParams
-        # while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
         while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
             layerName, filterNum, _ = globalRanking[listIdx]
 
