@@ -99,6 +99,44 @@ class Writer(object):
     #}}}
 #}}}
 
+class GoogLeNetWriter(Writer): 
+#{{{
+    def _transform_input_fn(self): 
+    #{{{
+        self.fprint(f"\tdef transform_input(self, {self.forVar}):")
+        self.fprint(f"\t\tx_ch0 = torch.unsqueeze({self.forVar}[:,0],1) * (0.229/0.5) + (0.485-0.5) / 0.5")
+        self.fprint(f"\t\tx_ch1 = torch.unsqueeze({self.forVar}[:,1],1) * (0.224/0.5) + (0.456-0.5) / 0.5")
+        self.fprint(f"\t\tx_ch2 = torch.unsqueeze({self.forVar}[:,2],1) * (0.225/0.5) + (0.406-0.5) / 0.5")
+        self.fprint(f"\t\t{self.forVar} = torch.cat((x_ch0, x_ch1, x_ch2), 1)")
+
+        self.fprint(f"\t\treturn {self.forVar}")
+    #}}}
+
+    def write_network(self, stdout=False): 
+    #{{{
+        if stdout:
+            self.modelDesc = sys.stdout 
+
+        self.write_preamble()
+        
+        [self.fprint(x) for x in self.toWrite['modules']]
+        
+        self.fprint('')
+        self._transform_input_fn()
+
+        self.fprint('')
+        self.fprint('\tdef forward(self, {}):'.format(self.forVar))
+        
+        self.toWrite['forward'] = [f"\t\t{self.forVar} = self.transform_input({self.forVar})"]\
+                + self.toWrite['forward']
+        [self.fprint(x) for x in self.toWrite['forward']]
+
+        self.write_postamble()
+
+        self.modelDesc.close()
+    #}}}
+#}}}
+
 # torch.nn modules
 def nn_conv2d(writer, modName, module, dw=False): 
 #{{{

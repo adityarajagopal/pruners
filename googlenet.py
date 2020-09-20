@@ -29,20 +29,19 @@ class GoogLeNetPruning(BasicPruning):
     def inc_prune_rate(self, layerName):
     #{{{
         lParam = str(layerName)
+        currLayerSize = self.layerSizes[lParam]
+        paramsPruned = currLayerSize[1]*currLayerSize[2]*currLayerSize[3]
         # remove 1 output filter from current layer
         self.layerSizes[lParam][0] -= 1 
         
         nextLayerDetails = self.depBlock.linkedConvAndFc[lParam]
         for (nextLayer, groups) in nextLayerDetails:
             nextLayerSize = self.layerSizes[nextLayer]
-            currLayerSize = self.layerSizes[lParam]
-            paramsPruned = currLayerSize[1]*currLayerSize[2]*currLayerSize[3]
 
             # check if FC layer
             if len(nextLayerSize) == 2: 
                 finalLayers = [k for k,v in self.depBlock.linkedConvAndFc.items() if v[0][0] == nextLayer]
                 currOFMSize = sum([self.layerSizes[x][0] for x in finalLayers]) 
-                # fcParamsPruned = int(nextLayerSize[1] / (currLayerSize[0] + 1))
                 fcParamsPruned = int(nextLayerSize[1] / (currOFMSize + 1))
                 paramsPruned += fcParamsPruned * nextLayerSize[0]
                 self.layerSizes[nextLayer][1] -= fcParamsPruned

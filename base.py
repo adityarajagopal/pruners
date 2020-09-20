@@ -19,8 +19,8 @@ currDir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(currDir)
 
 import dependencies as dependSrc
-from model_writers import Writer
-from weight_transfer import WeightTransferUnit
+from model_writers import Writer, GoogLeNetWriter
+from weight_transfer import WeightTransferUnit, GoogLeNetWeightTransferUnit
 
 import numpy as np
 
@@ -146,17 +146,19 @@ class BasicPruning(ABC):
         minIdx = np.argmin(array[np.nonzero(array)]) 
         return (minIdx, array[minIdx])     
     
-    def inc_prune_rate(self, layerName):
+    def inc_prune_rate_old(self, layerName):
     #{{{
         lParam = str(layerName)
         # remove 1 output filter from current layer
         self.layerSizes[lParam][0] -= 1 
+        currLayerSize = self.layerSizes[lParam]
+        paramsPruned = currLayerSize[1]*currLayerSize[2]*currLayerSize[3]
         
         nextLayerDetails = self.depBlock.linkedConvAndFc[lParam]
         for (nextLayer, groups) in nextLayerDetails:
             nextLayerSize = self.layerSizes[nextLayer]
-            currLayerSize = self.layerSizes[lParam]
-            paramsPruned = currLayerSize[1]*currLayerSize[2]*currLayerSize[3]
+            # currLayerSize = self.layerSizes[lParam]
+            # paramsPruned = currLayerSize[1]*currLayerSize[2]*currLayerSize[3]
 
             # check if FC layer
             if len(nextLayerSize) == 2: 
@@ -178,7 +180,42 @@ class BasicPruning(ABC):
                 if groups == 1:
                     self.layerSizes[nextLayer][1] -= 1
             
-            self.currParams -= paramsPruned
+        self.currParams -= paramsPruned
+        
+        return (100. * (1. - (self.currParams / self.totalParams)))
+    #}}}
+    
+    def inc_prune_rate(self, layerName):
+    #{{{
+        lParam = str(layerName)
+        currLayerSize = self.layerSizes[lParam]
+        paramsPruned = currLayerSize[1]*currLayerSize[2]*currLayerSize[3]
+        # remove 1 output filter from current layer
+        self.layerSizes[lParam][0] -= 1 
+        
+        nextLayerDetails = self.depBlock.linkedConvAndFc[lParam]
+        for (nextLayer, groups) in nextLayerDetails:
+            nextLayerSize = self.layerSizes[nextLayer]
+
+            # check if FC layer
+            if len(nextLayerSize) == 2: 
+                finalLayers = [k for k,v in self.depBlock.linkedConvAndFc.items() if v[0][0] == nextLayer]
+                currOFMSize = sum([self.layerSizes[x][0] for x in finalLayers]) 
+                fcParamsPruned = int(nextLayerSize[1] / (currOFMSize + 1))
+                paramsPruned += fcParamsPruned * nextLayerSize[0]
+                self.layerSizes[nextLayer][1] -= fcParamsPruned
+            else:
+                #TODO:
+                # this is assuming we only have either non-grouped convolutions or dw convolutions
+                # have to change to accomodate grouped convolutions
+                nextOpChannels = nextLayerSize[0] if groups == 1 else 1
+                paramsPruned += nextOpChannels*nextLayerSize[2]*nextLayerSize[3]
+                
+                # remove 1 input activation from next layer if it is not a dw conv
+                if groups == 1:
+                    self.layerSizes[nextLayer][1] -= 1
+            
+        self.currParams -= paramsPruned
         
         return (100. * (1. - (self.currParams / self.totalParams)))
     #}}}
@@ -366,8 +403,10 @@ class BasicPruning(ABC):
     #{{{
         print("Pruned model written to {}".format(self.filePath))
         channelsPruned = {l:len(v) for l,v in self.channelsToPrune.items()}
-        # self.writer = Writer(self.netName, channelsPruned, self.depBlock, self.filePath)
-        self.writer = Writer(self.netName, channelsPruned, self.depBlock, self.filePath, self.layerSizes)
+        if 'googlenet' in self.params.arch:
+            self.writer = GoogLeNetWriter(self.netName, channelsPruned, self.depBlock, self.filePath, self.layerSizes)
+        else:
+            self.writer = Writer(self.netName, channelsPruned, self.depBlock, self.filePath, self.layerSizes)
         lTypes, lNames = zip(*self.depBlock.linkedModules)
         prunedModel = copy.deepcopy(self.model)
         for n,m in prunedModel.named_modules(): 
@@ -397,7 +436,11 @@ class BasicPruning(ABC):
         
         pModStateDict = pModel.state_dict() 
 
-        self.wtu = WeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
+        if 'googlenet' in self.params.arch:
+            self.wtu = GoogLeNetWeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
+        else:
+            self.wtu = WeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
+        
         for n,m in oModel.named_modules(): 
             # detect dependent modules and convs
             if any(n == x for x in lNames):

@@ -39,6 +39,26 @@ class WeightTransferUnit(object):
     #}}}
 #}}}
 
+class GoogLeNetWeightTransferUnit(WeightTransferUnit): 
+#{{{
+    def __init__(self, prunedModel, channelsPruned, depBlk, layerSizes): 
+    #{{{
+        self.layerSizes = layerSizes
+        self.channelsPruned = channelsPruned
+        self.depBlk = depBlk
+        self.pModel = prunedModel
+
+        self.ipChannelsPruned = []
+
+        # only difference is that linear layer function used here is different
+        baseMods = {'basic': nn_conv2d, 'relu': nn_relu, 'relu6': nn_relu6, 'maxpool2d':nn_maxpool2d, 'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d, 'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear_googlenet, 'logsoftmax': nn_logsoftmax}
+        if hasattr(self, 'wtFuncs'):
+            self.wtFuncs.update(baseMods)
+        else:
+            self.wtFuncs = baseMods 
+    #}}}
+#}}}
+
 # torch.nn modules
 def nn_conv2d(wtu, modName, module, ipChannelsPruned=None, opChannelsPruned=None, dw=False): 
 #{{{
@@ -85,6 +105,31 @@ def nn_linear(wtu, modName, module):
     # allIpChannels = list(range(module.in_features))
     # ipChannelsKept = list(set(allIpChannels) - set(wtu.ipChannelsPruned))
     # wtu.pModel['{}.weight'.format(key)] = module._parameters['weight'][:,ipChannelsKept]
+    for i,channel in enumerate(ipChannelsKept):
+        sOrig = spatialSize * channel
+        eOrig = sOrig + spatialSize
+        sPrune = spatialSize * i
+        ePrune = sPrune + spatialSize
+        wtu.pModel['{}.weight'.format(key)][:,sPrune:ePrune] = module._parameters['weight'][:,sOrig:eOrig]
+    
+    wtu.pModel['{}.bias'.format(key)] = module._parameters['bias']
+
+    wtu.ipChannelsPruned = []
+    wtu.prevLayer = modName
+#}}}
+
+def nn_linear_googlenet(wtu, modName, module): 
+#{{{
+    inFeatures = wtu.layerSizes[modName][1]
+    prevLayers = [k for k,v in wtu.depBlk.linkedConvAndFc.items() if v[0][0] == modName]
+    prevOutChannels = sum([wtu.layerSizes[x][0] for x in prevLayers]) 
+
+    spatialSize = int(inFeatures / prevOutChannels)
+
+    allIpChannels = list(range(int(module.in_features/spatialSize)))
+    ipChannelsKept = list(set(allIpChannels) - set(wtu.ipChannelsPruned))
+    
+    key = 'module.{}'.format('_'.join(modName.split('.')[1:]))
     for i,channel in enumerate(ipChannelsKept):
         sOrig = spatialSize * channel
         eOrig = sOrig + spatialSize
