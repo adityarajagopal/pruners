@@ -44,17 +44,17 @@ class BasicPruning(ABC):
         self.layerSizes = {}
         
         # create model directory and file
-        dirName = '{}/{}/{}'.format(params.pruner['model_path'], params.dataset, params.pruner['subset_name'])
-        self.filePath = os.path.join(dirName, self.fileName)
+        self.dirName = '{}/{}/{}'.format(params.pruner['model_path'], params.dataset, params.pruner['subset_name'])
+        self.filePath = os.path.join(self.dirName, self.fileName)
         
         ## create dir if it doesn't exist
-        cmd = 'mkdir -p {}'.format(dirName)
+        cmd = 'mkdir -p {}'.format(self.dirName)
         subprocess.check_call(cmd, shell=True)
 
         self.depBlock = dependSrc.DependencyBlock(model)
         self.get_layer_params()
 
-        self.importPath = '{}.{}.{}'.format('.'.join(params.pruner['project_dir'].split('/')), '.'.join(dirName.split('/')), self.fileName.split('.')[0])
+        self.importPath = '{}.{}.{}'.format('.'.join(params.pruner['project_dir'].split('/')), '.'.join(self.dirName.split('/')), self.fileName.split('.')[0])
     #}}} 
     
     def get_layer_params(self):
@@ -116,7 +116,7 @@ class BasicPruning(ABC):
         return prunedModel
     #}}}
     
-    def prune_model(self, model, transferWeights=True):
+    def prune_model(self, model, transferWeights=True, pruneNum=None):
     #{{{
         # pruning based on l1 norm of weights
         if self.params.pruner['mode'] == 'l1-norm':
@@ -140,6 +140,20 @@ class BasicPruning(ABC):
             print('Pruned Percentage = {:.2f}%, NewModelSize = {:.2f}MB, OrigModelSize = {:.2f}MB'.format(pruneRate, prunedSize, origSize))
             optimiser = torch.optim.SGD(prunedModel.parameters(), lr=self.params.lr, momentum=self.params.momentum, weight_decay=self.params.weight_decay)
             return channelsPruned, prunedModel, optimiser
+        
+        elif self.params.pruner['mode'] == 'random_weighted': 
+            tqdm.write("Pruning filters: random_weighted")
+            if pruneNum is not None: 
+                self.filePath = self.filePath.split('.')[0] + f"_{pruneNum}.py"
+                self.importPath = '{}.{}.{}'.format('.'.join(self.params.pruner['project_dir'].split('/')), '.'.join(self.dirName.split('/')), f"{self.fileName.split('.')[0]}_{pruneNum}")
+            channelsPruned = self.random_weighted_selection(model)
+            self.write_net()
+            prunedModel = self.import_pruned_model()
+            pruneRate, prunedSize, origSize = self.prune_rate(prunedModel)
+            print('Pruned Percentage = {:.2f}%, NewModelSize = {:.2f}MB, OrigModelSize = {:.2f}MB'.format(pruneRate, prunedSize, origSize))
+            optimiser = torch.optim.SGD(prunedModel.parameters(), lr=self.params.lr, momentum=self.params.momentum, weight_decay=self.params.weight_decay)
+            return channelsPruned, prunedModel, optimiser
+
      #}}}
         
     def non_zero_argmin(self, array): 
@@ -290,6 +304,82 @@ class BasicPruning(ABC):
         
         internalDeps, externalDeps = self.depBlock.get_dependencies()
         
+        numChannelsInDependencyGroup = [len(localRanking[k[0]]) for k in externalDeps]
+        if float(self.params.pruner['pruning_perc']) >= 50.0:
+            groupPruningLimits = [int(math.ceil(gs * (1.0 - float(self.params.pruner['pruning_perc'])/100.0))) for gs in numChannelsInDependencyGroup]
+        else:
+            groupPruningLimits = [int(math.ceil(gs * float(self.params.pruner['pruning_perc'])/100.0)) for gs in numChannelsInDependencyGroup]
+
+        dependencies = internalDeps + externalDeps
+        groupPruningLimits = [2]*len(internalDeps) + groupPruningLimits
+        
+        self.remove_filters(localRanking, globalRanking, dependencies, groupPruningLimits)
+
+        return self.channelsToPrune
+    #}}}
+    
+    def select_random_weighted_filters(self, model):
+    #{{{
+        def generate_random_weighted_norms(param, layerMean):
+            # k = layerMean * 2
+            # theta = 0.5
+            # dist = torch.distributions.gamma.Gamma(torch.Tensor([k]), torch.Tensor([theta]))
+            dist = torch.distributions.uniform.Uniform(torch.Tensor([0]), torch.Tensor([1]))
+            metric = dist.sample([param.shape[0]]).mul(layerMean)
+            metric = metric.squeeze(1)
+            return metric
+        
+        localRanking = {} 
+        globalRanking = []
+
+        numLayers = len(self.depBlock.linkedConvs.keys())
+        
+        choice = torch.rand(1)
+        if choice < 0.3: 
+            # increased late layer pruning
+            layerMeans = [5*np.exp(-0.1*x) for x in range(numLayers)]
+        elif choice >= 0.3 and choice < 0.6: 
+            # increased early layer pruning
+            layerMeans = [5/np.exp(-0.1*x) for x in range(numLayers)]
+        else: 
+            # uniform pruning
+            layerMeans = [1 for x in range(numLayers)]
+
+        # create global ranking
+        layers = []
+        layerCount = 0
+        for p in model.named_parameters():
+            layerName = '.'.join(p[0].split('.')[:-1])
+            if layerName in self.depBlock.linkedConvs.keys() and layerName not in layers:
+                netInst = type(self.model.module)
+                try:
+                    if layerName in self.depBlock.ignore[netInst]:
+                        continue 
+                except (AttributeError, KeyError): 
+                    pass
+                layers.append(layerName)
+                
+                pNp = p[1].data.cpu().numpy()
+            
+                # calculate metric
+                metric = generate_random_weighted_norms(pNp, layerMeans[layerCount])
+
+                globalRanking += [(layerName, i, x) for i,x in enumerate(metric)]
+                localRanking[layerName] = sorted([(i, x) for i,x in enumerate(metric)], key=lambda tup:tup[1])
+                layerCount += 1
+        
+        globalRanking = sorted(globalRanking, key=lambda i: i[2]) 
+        self.channelsToPrune = {l:[] for l,m in model.named_modules() if isinstance(m, nn.Conv2d)}
+
+        return localRanking, globalRanking
+    #}}}
+    
+    def random_weighted_selection(self, model):
+    #{{{
+        localRanking, globalRanking = self.select_random_weighted_filters(model)
+        
+        internalDeps, externalDeps = self.depBlock.get_dependencies()
+
         numChannelsInDependencyGroup = [len(localRanking[k[0]]) for k in externalDeps]
         if float(self.params.pruner['pruning_perc']) >= 50.0:
             groupPruningLimits = [int(math.ceil(gs * (1.0 - float(self.params.pruner['pruning_perc'])/100.0))) for gs in numChannelsInDependencyGroup]
