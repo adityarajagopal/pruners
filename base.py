@@ -234,8 +234,8 @@ class BasicPruning(ABC):
             # if layer not in group, just remove filter from layer 
             # if layer is in a dependent group remove corresponding filter from each layer
             depLayers = [layerName] if depLayers == [] else depLayers
-            netInst = type(self.model.module)
             if hasattr(self.depBlock, 'ignore'): 
+                netInst = type(self.model.module)
                 ignoreLayers = any(x in self.depBlock.ignore[netInst] for x in depLayers)
             else:
                 ignoreLayers = False
@@ -275,8 +275,8 @@ class BasicPruning(ABC):
             layerName = '.'.join(p[0].split('.')[:-1])
             # if layerName in self.depBlock.linkedConvAndFc.keys() and layerName not in layers:
             if layerName in self.depBlock.linkedConvs.keys() and layerName not in layers:
-                netInst = type(self.model.module)
                 try:
+                    netInst = type(self.model.module)
                     if layerName in self.depBlock.ignore[netInst]:
                         continue 
                 except (AttributeError, KeyError): 
@@ -351,8 +351,8 @@ class BasicPruning(ABC):
         for p in model.named_parameters():
             layerName = '.'.join(p[0].split('.')[:-1])
             if layerName in self.depBlock.linkedConvs.keys() and layerName not in layers:
-                netInst = type(self.model.module)
                 try:
+                    netInst = type(self.model.module)
                     if layerName in self.depBlock.ignore[netInst]:
                         continue 
                 except (AttributeError, KeyError): 
@@ -454,10 +454,13 @@ class BasicPruning(ABC):
     #{{{
         print("Pruned model written to {}".format(self.filePath))
         channelsPruned = {l:len(v) for l,v in self.channelsToPrune.items()}
+        
         if 'googlenet' in self.params.arch:
-            self.writer = GoogLeNetWriter(self.netName, channelsPruned, self.depBlock, self.filePath, self.layerSizes)
+            self.writer = GoogLeNetWriter(self.netName, channelsPruned, self.depBlock, self.filePath,\
+                    self.layerSizes)
         else:
             self.writer = Writer(self.netName, channelsPruned, self.depBlock, self.filePath, self.layerSizes)
+        
         lTypes, lNames = zip(*self.depBlock.linkedModules)
         prunedModel = copy.deepcopy(self.model)
         for n,m in prunedModel.named_modules(): 
@@ -488,7 +491,8 @@ class BasicPruning(ABC):
         pModStateDict = pModel.state_dict() 
 
         if 'googlenet' in self.params.arch:
-            self.wtu = GoogLeNetWeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
+            self.wtu = GoogLeNetWeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock,\
+                    self.layerSizes)
         else:
             self.wtu = WeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
         
@@ -507,11 +511,9 @@ class BasicPruning(ABC):
             else:
                 try: 
                     self.wtu.transfer_weights(type(m).__name__.lower(), n, m)
-                except KeyError:
-                    print("CRITICAL WARNING : layer found ({}) that is not handled in writers. This could potentially break the network.".format(type(m)))
+                except KeyError as e:
+                    print(f"CRITICAL WARNING : layer found ({type(m)}) that is not handled in weight transfer. This could potentially break the network.")
         
-        # print(self.depBlock.linkedModules)
-        # breakpoint()
         pModel.load_state_dict(pModStateDict)
         return pModel 
     #}}}

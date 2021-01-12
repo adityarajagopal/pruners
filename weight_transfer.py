@@ -10,14 +10,19 @@ class WeightTransferUnit(object):
 #{{{
     def __init__(self, prunedModel, channelsPruned, depBlk, layerSizes): 
     #{{{
-        self.layerSizes = layerSizes
-        self.channelsPruned = channelsPruned
+        self.layerSizes = {k.replace('.','_'): v for k,v in layerSizes.items()}
+        self.channelsPruned = {k.replace('.','_'): v for k,v in channelsPruned.items()}
         self.depBlk = depBlk
         self.pModel = prunedModel
 
+        # pre-fix checks if DataParallel wrapper is present around the model (module prefix) 
+        self.prefix = '' if 'module' not in list(self.pModel.keys())[0] else 'module.'
+
         self.ipChannelsPruned = []
 
-        baseMods = {'basic': nn_conv2d, 'relu': nn_relu, 'relu6': nn_relu6, 'maxpool2d':nn_maxpool2d, 'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d, 'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear, 'logsoftmax': nn_logsoftmax}
+        baseMods = {'basic': nn_conv2d, 'relu': nn_relu, 'relu6': nn_relu6, 'maxpool2d':nn_maxpool2d,\
+                    'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d,\
+                    'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear, 'logsoftmax': nn_logsoftmax}
         if hasattr(self, 'wtFuncs'):
             self.wtFuncs.update(baseMods)
         else:
@@ -42,26 +47,30 @@ class WeightTransferUnit(object):
 class GoogLeNetWeightTransferUnit(WeightTransferUnit): 
 #{{{
     def __init__(self, prunedModel, channelsPruned, depBlk, layerSizes): 
+        super().__init__(prunedModel, channelsPruned, depBlk, layerSizes)
+        self.wtFuncs['linear'] = nn_linear_googlenet
+#}}}
+
+class OFAResNetWeightTransferUnit(WeightTransferUnit): 
+#{{{
+    def __init__(self, prunedModel, channelsPruned, depBlk, layerSizes):
     #{{{
-        self.layerSizes = layerSizes
-        self.channelsPruned = channelsPruned
-        self.depBlk = depBlk
-        self.pModel = prunedModel
-
-        self.ipChannelsPruned = []
-
-        # only difference is that linear layer function used here is different
-        baseMods = {'basic': nn_conv2d, 'relu': nn_relu, 'relu6': nn_relu6, 'maxpool2d':nn_maxpool2d, 'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d, 'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear_googlenet, 'logsoftmax': nn_logsoftmax}
-        if hasattr(self, 'wtFuncs'):
-            self.wtFuncs.update(baseMods)
-        else:
-            self.wtFuncs = baseMods 
+        super().__init__(prunedModel, channelsPruned, depBlk, layerSizes)
+        self.channelsPruned = {k.replace('.','_'): v for k,v in self.channelsPruned.items()}
+    #}}}
+    
+    def transfer_weights(self, lType, modName, module): 
+    #{{{
+        modName = modName.replace('.','_')
+        self.wtFuncs[lType](self, modName, module)
     #}}}
 #}}}
 
 # torch.nn modules
 def nn_conv2d(wtu, modName, module, ipChannelsPruned=None, opChannelsPruned=None, dw=False): 
 #{{{
+    modName = modName.replace('.', '_')
+    
     dw = dw or (module.in_channels == module.groups)
     allIpChannels = list(range(module.in_channels))
     allOpChannels = list(range(module.out_channels))
@@ -71,8 +80,10 @@ def nn_conv2d(wtu, modName, module, ipChannelsPruned=None, opChannelsPruned=None
     opChannels = list(set(allOpChannels) - set(opPruned))
     wtu.ipChannelsPruned = opPruned 
     
-    pWeight = 'module.{}.weight'.format('_'.join(modName.split('.')[1:]))
-    pBias = 'module.{}.bias'.format('_'.join(modName.split('.')[1:]))
+    # pWeight = 'module.{}.weight'.format('_'.join(modName.split('.')[1:]))
+    # pBias = 'module.{}.bias'.format('_'.join(modName.split('.')[1:]))
+    pWeight = f'{wtu.prefix}{modName}.weight'
+    pBias = f'{wtu.prefix}{modName}.bias'
     wtu.pModel[pWeight] = module._parameters['weight'][opChannels,:][:,ipChannels]
     if module._parameters['bias'] is not None:
         wtu.pModel[pBias] = module._parameters['bias'][opChannels]
@@ -82,9 +93,13 @@ def nn_conv2d(wtu, modName, module, ipChannelsPruned=None, opChannelsPruned=None
 
 def nn_batchnorm2d(wtu, modName, module): 
 #{{{
+    modName = modName.replace('.', '_')
+    
     allFeatures = list(range(module.num_features))
     numFeaturesKept = list(set(allFeatures) - set(wtu.ipChannelsPruned))
-    key = 'module.{}'.format('_'.join(modName.split('.')[1:]))
+    
+    # key = 'module.{}'.format('_'.join(modName.split('.')[1:]))
+    key = f'{wtu.prefix}{modName}'
     wtu.pModel['{}.weight'.format(key)] = module._parameters['weight'][numFeaturesKept]
     wtu.pModel['{}.bias'.format(key)] = module._parameters['bias'][numFeaturesKept]
     wtu.pModel['{}.running_mean'.format(key)] = module._buffers['running_mean'][numFeaturesKept]
@@ -94,6 +109,8 @@ def nn_batchnorm2d(wtu, modName, module):
 
 def nn_linear(wtu, modName, module): 
 #{{{
+    modName = modName.replace('.', '_')
+    
     inFeatures = wtu.layerSizes[modName][1]
     prevOutChannels = wtu.layerSizes[wtu.prevLayer][0]
     spatialSize = int(inFeatures / prevOutChannels)
@@ -101,10 +118,8 @@ def nn_linear(wtu, modName, module):
     allIpChannels = list(range(int(module.in_features/spatialSize)))
     ipChannelsKept = list(set(allIpChannels) - set(wtu.ipChannelsPruned))
     
-    key = 'module.{}'.format('_'.join(modName.split('.')[1:]))
-    # allIpChannels = list(range(module.in_features))
-    # ipChannelsKept = list(set(allIpChannels) - set(wtu.ipChannelsPruned))
-    # wtu.pModel['{}.weight'.format(key)] = module._parameters['weight'][:,ipChannelsKept]
+    # key = 'module.{}'.format('_'.join(modName.split('.')[1:]))
+    key = f'{wtu.prefix}{modName}'
     for i,channel in enumerate(ipChannelsKept):
         sOrig = spatialSize * channel
         eOrig = sOrig + spatialSize
@@ -120,8 +135,13 @@ def nn_linear(wtu, modName, module):
 
 def nn_linear_googlenet(wtu, modName, module): 
 #{{{
+    modName = modName.replace('.', '_')
+    
     inFeatures = wtu.layerSizes[modName][1]
-    prevLayers = [k for k,v in wtu.depBlk.linkedConvAndFc.items() if v[0][0] == modName]
+    _depBlk = {k.replace('.','_'): [(x[0].replace('.','_'), x[1]) for x in v] for k,v in\
+            wtu.depBlk.linkedConvAndFc.items()}
+    prevLayers = [k for k,v in _depBlk.items() if v[0][0] == modName]
+    # prevLayers = [k for k,v in wtu.depBlk.linkedConvAndFc.items() if v[0][0] == modName]
     prevOutChannels = sum([wtu.layerSizes[x][0] for x in prevLayers]) 
 
     spatialSize = int(inFeatures / prevOutChannels)
@@ -129,7 +149,8 @@ def nn_linear_googlenet(wtu, modName, module):
     allIpChannels = list(range(int(module.in_features/spatialSize)))
     ipChannelsKept = list(set(allIpChannels) - set(wtu.ipChannelsPruned))
     
-    key = 'module.{}'.format('_'.join(modName.split('.')[1:]))
+    # key = 'module.{}'.format('_'.join(modName.split('.')[1:]))
+    key = f'{wtu.prefix}{modName}'
     for i,channel in enumerate(ipChannelsKept):
         sOrig = spatialSize * channel
         eOrig = sOrig + spatialSize
@@ -164,6 +185,11 @@ def nn_avgpool2d(wtu, modName, module):
 #}}}
 
 def nn_adaptiveavgpool2d(wtu, modName, module): 
+#{{{
+    pass
+#}}}
+
+def ofa_adaptiveavgpool2d(wtu, modName, module): 
 #{{{
     pass
 #}}}
@@ -241,6 +267,31 @@ def residual(wtu, modName, module):
     
     def residual_branch(n, m, fullName, wtu, ipToBlock, opOfBlock): 
     #{{{
+        if isinstance(m, nn.Conv2d): 
+            nn_conv2d(wtu, fullName, m, ipToBlock, opOfBlock)
+            
+        elif isinstance(m, nn.BatchNorm2d):
+            nn_batchnorm2d(wtu, fullName, m)
+    #}}}
+
+    residual_backbone(wtu, modName, module, main_branch, residual_branch, None)
+#}}}
+
+def ofa_residual(wtu, modName, module):
+#{{{
+    def main_branch(n, m, fullName, wtu): 
+    #{{{
+        fullName = fullName.replace('.','_')
+        if isinstance(m, nn.Conv2d): 
+            nn_conv2d(wtu, fullName, m)
+
+        elif isinstance(m, nn.BatchNorm2d): 
+            nn_batchnorm2d(wtu, fullName, m)
+    #}}}
+    
+    def residual_branch(n, m, fullName, wtu, ipToBlock, opOfBlock): 
+    #{{{
+        fullName = fullName.replace('.', '_')
         if isinstance(m, nn.Conv2d): 
             nn_conv2d(wtu, fullName, m, ipToBlock, opOfBlock)
             

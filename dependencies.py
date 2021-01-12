@@ -132,7 +132,8 @@ class Residual(DependencyCalculator):
                     idx = convs.index(n)
                     if idx != len(convs)-1:
                         nextConv = "{}.{}".format(name, convs[idx+1])
-                        groups = module._modules[convs[idx+1]].groups
+                        # groups = module._modules[convs[idx+1]].groups
+                        groups = dict(module.named_modules())[convs[idx+1]].groups
                         nextLayers[_n] = [(nextConv, groups)]
                     else:
                         nextLayers[_n] = []
@@ -141,7 +142,8 @@ class Residual(DependencyCalculator):
                     idx = [x in n for x in ds].index(True)
                     if idx != len(ds)-1:
                         nextConv = "{}.{}".format(name, ds[idx+1])
-                        groups = module._modules[ds[idx+1]].groups
+                        # groups = module._modules[ds[idx+1]].groups
+                        groups = dict(module.named_modules())[ds[idx+1]].groups
                         nextLayers[_n] = [(nextConv, groups)]
                 
                 else:
@@ -153,7 +155,8 @@ class Residual(DependencyCalculator):
    
     def get_interface_layers(self, name, module, convs, ds): 
     #{{{
-        interfaceLayers = [("{}.{}".format(name, convs[0]), module._modules[convs[0]].groups)]
+        # interfaceLayers = [("{}.{}".format(name, convs[0]), module._modules[convs[0]].groups)]
+        interfaceLayers = [("{}.{}".format(name, convs[0]), dict(module.named_modules())[convs[0]].groups)]
         
         # only want first ds layer as this is the interface layer
         # assumption ds layers are listed in order --> ds[0]

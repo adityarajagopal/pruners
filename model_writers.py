@@ -19,7 +19,9 @@ class Writer(object):
         self.useCount = False 
         self.returnStatement = "return {}.squeeze(2).squeeze(2)" if 'squeezenet' == self.netName.lower() else "return {}"
         
-        baseWriters = {'basic': nn_conv2d, 'relu': nn_relu, 'relu6': nn_relu6, 'maxpool2d':nn_maxpool2d, 'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d, 'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear, 'logsoftmax': nn_logsoftmax}
+        baseWriters = {'basic': nn_conv2d, 'relu': nn_relu, 'relu6': nn_relu6, 'maxpool2d':nn_maxpool2d,\
+                       'avgpool2d':nn_avgpool2d, 'adaptiveavgpool2d':nn_adaptiveavgpool2d,\
+                       'batchnorm2d': nn_batchnorm2d, 'linear': nn_linear, 'logsoftmax': nn_logsoftmax}
         if hasattr(self, 'writers'):
             self.writers.update(baseWriters)
         else:
@@ -86,14 +88,14 @@ class Writer(object):
 
     def write_module_desc(self, modName, module):
     #{{{
-        layerName = '_'.join(modName.split('.')[1:])
+        layerName = modName.replace('.','_')
         mod = '\t\tself.{} = nn.{}'.format(layerName, str(module))
         self.toWrite['modules'].append(mod)
     #}}}
 
     def write_module_forward(self, modName):
     #{{{
-        layerName = '_'.join(modName.split('.')[1:])
+        layerName = modName.replace('.','_')
         forward = '\t\t{} = self.{}({})'.format(self.forVar, layerName, self.forVar) 
         self.toWrite['forward'].append(forward)
     #}}}
@@ -134,6 +136,21 @@ class GoogLeNetWriter(Writer):
         self.write_postamble()
 
         self.modelDesc.close()
+    #}}}
+#}}}
+
+class OFAResNetWriter(Writer): 
+#{{{
+    def write_module_desc(self, modName, module):
+    #{{{
+        mod = '\t\tself.{} = nn.{}'.format(modName.replace('.', '_'), str(module))
+        self.toWrite['modules'].append(mod)
+    #}}}
+
+    def write_module_forward(self, modName):
+    #{{{
+        forward = '\t\t{} = self.{}({})'.format(self.forVar, modName.replace('.','_'), self.forVar) 
+        self.toWrite['forward'].append(forward)
     #}}}
 #}}}
 
@@ -178,6 +195,13 @@ def nn_avgpool2d(writer, modName, module):
 
 def nn_adaptiveavgpool2d(writer, modName, module): 
 #{{{
+    writer.write_module_desc(modName, module)
+    writer.write_module_forward(modName)
+#}}}
+
+def ofa_adaptiveavgpool2d(writer, modName, module): 
+#{{{
+    module = nn.AdaptiveAvgPool2d((1,1))
     writer.write_module_desc(modName, module)
     writer.write_module_forward(modName)
 #}}}
@@ -231,7 +255,6 @@ def residual_backbone(writer, modName, module, main_branch, residual_branch, agg
     
     for n,m in module.named_modules(): 
         fullName = "{}.{}".format(modName, n)
-        
         if not any(x in n for x in writer.depBlk.dsLayers[idx]):
             main_branch(n, m, fullName, writer)
     
@@ -299,7 +322,6 @@ def residual(writer, modName, module):
     #{{{
         if isinstance(m, nn.Conv2d): 
             idx = writer.depBlk.instances.index(type(module))
-            # writer.addRelu = (n != writer.depBlk.convs[idx][0])
             writer.addRelu = (n != writer.depBlk.convs[idx][-1])
             nn_conv2d(writer, fullName, m)
 
@@ -311,6 +333,47 @@ def residual(writer, modName, module):
     
     def residual_branch(n, m, fullName, writer, ipToBlock, opOfBlock): 
     #{{{
+        if isinstance(m, nn.Conv2d): 
+            m.in_channels = ipToBlock
+            m.out_channels = opOfBlock
+            writer.currIpChannels = opOfBlock
+            
+            writer.write_module_desc(fullName, m)
+            writer.write_module_forward(fullName)
+        
+        elif isinstance(m, nn.BatchNorm2d):
+            nn_batchnorm2d(writer, fullName, m)
+    #}}}
+
+    def aggregation_op(writer, node1, node2):
+    #{{{
+        forward = '\t\t{} = F.relu({} + {}, inplace=True)'.format(writer.forVar, node1, node2)
+        writer.toWrite['forward'].append(forward)
+    #}}}
+    
+    residual_backbone(writer, modName, module, main_branch, residual_branch, aggregation_op)
+#}}}
+
+def ofa_residual(writer, modName, module):
+#{{{
+    def main_branch(n, m, fullName, writer): 
+    #{{{
+        if isinstance(m, nn.Conv2d): 
+            idx = writer.depBlk.instances.index(type(module))
+            writer.addRelu = (n != writer.depBlk.convs[idx][-1])
+            nn_conv2d(writer, fullName, m)
+
+        elif isinstance(m, nn.BatchNorm2d): 
+            nn_batchnorm2d(writer, fullName, m)
+            if writer.addRelu: 
+                nn_relu(writer, fullName, m)
+    #}}}
+    
+    def residual_branch(n, m, fullName, writer, ipToBlock, opOfBlock): 
+    #{{{
+        if isinstance(m, nn.AvgPool2d): 
+            nn_avgpool2d(writer, fullName, m)
+
         if isinstance(m, nn.Conv2d): 
             m.in_channels = ipToBlock
             m.out_channels = opOfBlock
