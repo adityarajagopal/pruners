@@ -112,7 +112,6 @@ class BasicPruning(ABC):
         module = importlib.import_module(self.importPath)
         pModel = module.__dict__[self.netName]
         prunedModel = pModel(num_classes=100)
-        prunedModel = torch.nn.DataParallel(prunedModel, self.gpu_list).cuda()
         return prunedModel
     #}}}
     
