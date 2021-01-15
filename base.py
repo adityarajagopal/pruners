@@ -214,54 +214,6 @@ class BasicPruning(ABC):
         return metric
     #}}}
     
-    def remove_filters(self, localRanking, globalRanking, dependencies, groupPruningLimits):
-    #{{{
-        currentPruneRate = 0
-        listIdx = 0
-        self.currParams = self.totalParams
-        while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
-            layerName, filterNum, _ = globalRanking[listIdx]
-
-            depLayers = []
-            pruningLimit = self.minFiltersInLayer
-            for i, group in enumerate(dependencies):
-                if layerName in group:            
-                    depLayers = group
-                    pruningLimit = groupPruningLimits[i]
-                    break
-            
-            # if layer not in group, just remove filter from layer 
-            # if layer is in a dependent group remove corresponding filter from each layer
-            depLayers = [layerName] if depLayers == [] else depLayers
-            if hasattr(self.depBlock, 'ignore'): 
-                netInst = type(self.model.module)
-                ignoreLayers = any(x in self.depBlock.ignore[netInst] for x in depLayers)
-            else:
-                ignoreLayers = False
-            if not ignoreLayers:
-                for layerName in depLayers:
-                    # case where you want to skip layers
-                    # if layers are dependent, skipping one means skipping all the dependent layers
-                    if len(localRanking[layerName]) <= pruningLimit:
-                        listIdx += 1
-                        continue
-               
-                    # if filter has already been pruned, continue
-                    # could happen to due to dependencies
-                    if filterNum in self.channelsToPrune[layerName]:
-                        listIdx += 1
-                        continue 
-                    
-                    localRanking[layerName].pop(0)
-                    self.channelsToPrune[layerName].append(filterNum)
-                    
-                    currentPruneRate = self.inc_prune_rate(layerName) 
-            
-            listIdx += 1
-
-        return self.channelsToPrune
-    #}}}
-    
     def rank_filters(self, model):
     #{{{
         localRanking = {} 
@@ -303,15 +255,18 @@ class BasicPruning(ABC):
         
         internalDeps, externalDeps = self.depBlock.get_dependencies()
         
+        ### This ensure only 50% of the filters within a given layer can be pruned 
+        ### Did this as pruning a lot of filters within a layer negatively affected ability to retrain
+        ### This is enforced only for external dependencies, but internally within a block the internal layers
+        ### can be pruned heavily
         numChannelsInDependencyGroup = [len(localRanking[k[0]]) for k in externalDeps]
         if float(self.params.pruner['pruning_perc']) >= 50.0:
             groupPruningLimits = [int(math.ceil(gs * (1.0 - float(self.params.pruner['pruning_perc'])/100.0))) for gs in numChannelsInDependencyGroup]
         else:
             groupPruningLimits = [int(math.ceil(gs * float(self.params.pruner['pruning_perc'])/100.0)) for gs in numChannelsInDependencyGroup]
-
-        dependencies = internalDeps + externalDeps
-        groupPruningLimits = [2]*len(internalDeps) + groupPruningLimits
+        groupPruningLimits = [self.minFiltersInLayer]*len(internalDeps) + groupPruningLimits
         
+        dependencies = internalDeps + externalDeps
         self.remove_filters(localRanking, globalRanking, dependencies, groupPruningLimits)
 
         return self.channelsToPrune
@@ -449,6 +404,56 @@ class BasicPruning(ABC):
         return self.channelsToPrune
     #}}}
     
+    def remove_filters(self, localRanking, globalRanking, dependencies, groupPruningLimits):
+    #{{{
+        listIdx = 0
+        count0 = 0
+        currentPruneRate = 0
+        self.currParams = self.totalParams
+        while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
+            layerName, filterNum, _ = globalRanking[listIdx]
+            # breakpoint()
+
+            depLayers = []
+            pruningLimit = self.minFiltersInLayer
+            for i, group in enumerate(dependencies):
+                if layerName in group:            
+                    depLayers = group
+                    pruningLimit = groupPruningLimits[i]
+                    break
+            
+            # if layer not in group, just remove filter from layer 
+            # if layer is in a dependent group remove corresponding filter from each layer
+            depLayers = [layerName] if depLayers == [] else depLayers
+            if hasattr(self.depBlock, 'ignore'): 
+                netInst = type(self.model.module)
+                ignoreLayers = any(x in self.depBlock.ignore[netInst] for x in depLayers)
+            else:
+                ignoreLayers = False
+            if not ignoreLayers:
+                for layerName in depLayers:
+                    # case where you want to skip layers
+                    # if layers are dependent, skipping one means skipping all the dependent layers
+                    if len(localRanking[layerName]) <= pruningLimit:
+                        count0 += 1
+                        continue
+               
+                    # if filter has already been pruned, continue
+                    # could happen to due to dependencies
+                    if filterNum in self.channelsToPrune[layerName]:
+                        continue 
+                    
+                    localRanking[layerName].pop(0)
+                    self.channelsToPrune[layerName].append(filterNum)
+                    
+                    currentPruneRate = self.inc_prune_rate(layerName) 
+            
+            listIdx += 1
+        
+        print(f"Number of times min filter count hit = {count0}")
+        return self.channelsToPrune
+    #}}}
+    
     def write_net(self):
     #{{{
         print("Pruned model written to {}".format(self.filePath))
@@ -495,7 +500,9 @@ class BasicPruning(ABC):
         else:
             self.wtu = WeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
         
-        for n,m in oModel.named_modules(): 
+        mutableOModel = copy.deepcopy(oModel)
+        for n,m in mutableOModel.named_modules(): 
+            [x.detach_() for x in m.parameters()]
             # detect dependent modules and convs
             if any(n == x for x in lNames):
                 idx = lNames.index(n) 
