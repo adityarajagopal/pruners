@@ -412,7 +412,6 @@ class BasicPruning(ABC):
         self.currParams = self.totalParams
         while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
             layerName, filterNum, _ = globalRanking[listIdx]
-            # breakpoint()
 
             depLayers = []
             pruningLimit = self.minFiltersInLayer
@@ -498,7 +497,7 @@ class BasicPruning(ABC):
             self.wtu = GoogLeNetWeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock,\
                     self.layerSizes)
         else:
-            self.wtu = WeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
+            self.wtu = WeightTransferUnit(self, pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
         
         mutableOModel = copy.deepcopy(oModel)
         for n,m in mutableOModel.named_modules(): 
