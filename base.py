@@ -255,19 +255,28 @@ class BasicPruning(ABC):
         
         internalDeps, externalDeps = self.depBlock.get_dependencies()
         
-        ### This ensure only 50% of the filters within a given layer can be pruned 
-        ### Did this as pruning a lot of filters within a layer negatively affected ability to retrain
-        ### This is enforced only for external dependencies, but internally within a block the internal layers
-        ### can be pruned heavily
+        pl = float(self.params.pruner['pruning_perc'])/100.
         numChannelsInDependencyGroup = [len(localRanking[k[0]]) for k in externalDeps]
-        if float(self.params.pruner['pruning_perc']) >= 50.0:
-            groupPruningLimits = [int(math.ceil(gs * (1.0 - float(self.params.pruner['pruning_perc'])/100.0))) for gs in numChannelsInDependencyGroup]
+        
+        if ('resnet' in self.params.arch or self.params.ofa is not None) and pl >= 0.85: 
+            groupPruningLimits = [int(math.ceil(gs * 0.5)) for gs in numChannelsInDependencyGroup]
         else:
-            groupPruningLimits = [int(math.ceil(gs * float(self.params.pruner['pruning_perc'])/100.0)) for gs in numChannelsInDependencyGroup]
+            ### This strategy ensures that at as many pruning levels as possible we maintain wider networks  
+            ### At very high pruning levels (those in the if case above), we can't apply the same strategy
+            ### as it limits the total amount of pruning possible (memory reduction) --> this is capped at 
+            ### at most pruning 50% of the layer which allows desired memory reduction with some width maintenance
+            ### This is enforced only for external dependencies, but internally within a block the internal layers
+            ### can be pruned heavily
+            if pl <= 0.5: 
+                groupPruningLimits = [int(math.ceil(gs * (1.0 - pl))) for gs in numChannelsInDependencyGroup]
+            else:
+                groupPruningLimits = [int(math.ceil(gs * (pl))) for gs in numChannelsInDependencyGroup]
+        
         groupPruningLimits = [self.minFiltersInLayer]*len(internalDeps) + groupPruningLimits
         
         dependencies = internalDeps + externalDeps
         self.remove_filters(localRanking, globalRanking, dependencies, groupPruningLimits)
+        # self.remove_filters_and_layers(localRanking, globalRanking, dependencies, groupPruningLimits)
 
         return self.channelsToPrune
     #}}}
@@ -404,6 +413,59 @@ class BasicPruning(ABC):
         return self.channelsToPrune
     #}}}
     
+    def remove_filters_and_layers(self, localRanking, globalRanking, dependencies, groupPruningLimits):
+    #{{{
+        listIdx = 0
+        count0 = 0
+        currentPruneRate = 0
+        self.currParams = self.totalParams
+        blocksToRemove = []
+        while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
+            layerName, filterNum, _ = globalRanking[listIdx]
+
+            depLayers = []
+            pruningLimit = self.minFiltersInLayer
+            for i, group in enumerate(dependencies):
+                if layerName in group:            
+                    depLayers = group
+                    pruningLimit = groupPruningLimits[i]
+                    break
+            # if layer not in group, just remove filter from layer 
+            # if layer is in a dependent group remove corresponding filter from each layer
+            depLayers = [layerName] if depLayers == [] else depLayers
+            if hasattr(self.depBlock, 'ignore'): 
+                netInst = type(self.model.module)
+                ignoreLayers = any(x in self.depBlock.ignore[netInst] for x in depLayers)
+            else:
+                ignoreLayers = False
+            if not ignoreLayers:
+                for layerName in depLayers:
+                    # case where you want to skip layers
+                    # if layers are dependent, skipping one means skipping all the dependent layers
+                    if len(localRanking[layerName]) <= pruningLimit:
+                        blockName = '.'.join(layerName.split('.')[:-1])
+                        if blockName not in blocksToRemove:
+                            blocksToRemove.append(blockName)
+                        count0 += 1
+                        continue
+               
+                    # if filter has already been pruned, continue
+                    # could happen to due to dependencies
+                    if filterNum in self.channelsToPrune[layerName]:
+                        continue 
+                    
+                    localRanking[layerName].pop(0)
+                    self.channelsToPrune[layerName].append(filterNum)
+                    
+                    currentPruneRate = self.inc_prune_rate(layerName) 
+            
+            listIdx += 1
+        
+        print(f"Number of times min filter count hit = {count0}")
+        print(f"Blocks to remove: {blocksToRemove}")
+        return self.channelsToPrune
+    #}}}
+    
     def remove_filters(self, localRanking, globalRanking, dependencies, groupPruningLimits):
     #{{{
         listIdx = 0
@@ -494,7 +556,7 @@ class BasicPruning(ABC):
         pModStateDict = pModel.state_dict() 
 
         if 'googlenet' in self.params.arch:
-            self.wtu = GoogLeNetWeightTransferUnit(pModStateDict, self.channelsToPrune, self.depBlock,\
+            self.wtu = GoogLeNetWeightTransferUnit(self, pModStateDict, self.channelsToPrune, self.depBlock,\
                     self.layerSizes)
         else:
             self.wtu = WeightTransferUnit(self, pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)

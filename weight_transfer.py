@@ -58,8 +58,8 @@ class WeightTransferUnit(object):
 
 class GoogLeNetWeightTransferUnit(WeightTransferUnit): 
 #{{{
-    def __init__(self, prunedModel, channelsPruned, depBlk, layerSizes): 
-        super().__init__(prunedModel, channelsPruned, depBlk, layerSizes)
+    def __init__(self, app, prunedModel, channelsPruned, depBlk, layerSizes): 
+        super().__init__(app, prunedModel, channelsPruned, depBlk, layerSizes)
         self.wtFuncs['linear'] = nn_linear_googlenet
 #}}}
 
@@ -354,27 +354,27 @@ def residual(wtu, modName, module):
     def main_branch(n, m, fullName, wtu): 
     #{{{
         if isinstance(m, nn.Conv2d): 
-            # nn_conv2d(wtu, fullName, m)
-            start = time.time()
-            nn_conv2d_smart_update(wtu, fullName, m)
-            print(f"Update took {time.time() - start}")
+            nn_conv2d(wtu, fullName, m)
+            # start = time.time()
+            # nn_conv2d_smart_update(wtu, fullName, m)
+            # print(f"Update took {time.time() - start}")
 
         elif isinstance(m, nn.BatchNorm2d): 
-            # nn_batchnorm2d(wtu, fullName, m)
-            nn_batchnorm2d_smart_update(wtu, fullName, m)
+            nn_batchnorm2d(wtu, fullName, m)
+            # nn_batchnorm2d_smart_update(wtu, fullName, m)
     #}}}
     
     def residual_branch(n, m, fullName, wtu, ipToBlock, opOfBlock): 
     #{{{
         if isinstance(m, nn.Conv2d): 
-            # nn_conv2d(wtu, fullName, m, ipToBlock, opOfBlock)
-            start = time.time()
-            nn_conv2d_smart_update(wtu, fullName, m, ipToBlock, opOfBlock)
-            print(f"Update took {time.time() - start}")
+            nn_conv2d(wtu, fullName, m, ipToBlock, opOfBlock)
+            # start = time.time()
+            # nn_conv2d_smart_update(wtu, fullName, m, ipToBlock, opOfBlock)
+            # print(f"Update took {time.time() - start}")
             
         elif isinstance(m, nn.BatchNorm2d):
-            # nn_batchnorm2d(wtu, fullName, m)
-            nn_batchnorm2d_smart_update(wtu, fullName, m)
+            nn_batchnorm2d(wtu, fullName, m)
+            # nn_batchnorm2d_smart_update(wtu, fullName, m)
     #}}}
 
     residual_backbone(wtu, modName, module, main_branch, residual_branch, None)
