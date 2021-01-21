@@ -17,7 +17,9 @@ import torch
 import torch.nn as nn
 
 import src.adapt.lego.utils as utils
-from src.adapt.lego.pruners.base import BasicPruning
+from base import BasicPruning
+from model_writers import Writer, GoogLeNetWriter
+from weight_transfer import WeightTransferUnit, GoogLeNetWeightTransferUnit
 
 class ResNet20Pruning(BasicPruning):
 #{{{
@@ -449,11 +451,14 @@ class ResNet20PruningDependency(BasicPruning):
         else:
             self.fileName = 'resnet{}_{}.py'.format(int(params.depth), int(params.pruner['pruning_perc']))
             self.netName = 'ResNet{}'.format(int(params.depth))
+
+        if eval(params.pruner['prune_layers']) == True: 
+            self.fileName = f"{self.fileName.split('.')[0]}_layerprune.py"
         
         super().__init__(params, model)
     #}}}
     
-    def inc_prune_rate(self, layerName, dependencies):
+    def inc_prune_rate(self, layerName, dependencies, updateGlobalParams=True):
     #{{{
         lParam = str(layerName)
         currLayerSize = self.layerSizes[lParam]
@@ -463,11 +468,11 @@ class ResNet20PruningDependency(BasicPruning):
         
         # check if it is at the head of a dependency group, i.e. it has a downsampling layer
         if any(x.index(layerName) == 0 for x in dependencies if layerName in x):
-            blockName = '.'.join(layerName.split('.')[:-1])
+            blockName = [x[1] for x in self.depBlock.linkedModules if x[1] in layerName][0] 
             module = [m for n,m in self.model.named_modules() if n == blockName][0]
             instances = [isinstance(module, x) for x in self.depBlock.instances]
             if True in instances: 
-                instanceIdx = instance.index(True)
+                instanceIdx = instances.index(True)
                 dsInstName = self.depBlock.dsLayers[instanceIdx][0]
                 dsLayer = [x for x,p in module.named_modules() if dsInstName in x and\
                         isinstance(p, torch.nn.Conv2d)][0]
@@ -498,7 +503,8 @@ class ResNet20PruningDependency(BasicPruning):
                 if groups == 1:
                     self.layerSizes[nextLayer][1] -= 1
             
-        self.currParams -= paramsPruned
+        if updateGlobalParams:
+            self.currParams -= paramsPruned
         
         return (100. * (1. - (self.currParams / self.totalParams)))
     #}}}
@@ -511,7 +517,7 @@ class ResNet20PruningDependency(BasicPruning):
                 channelsLeftToPrune = len(localRanking[l])
                 del localRanking[l]
                 del self.channelsToPrune[l]
-                currentPruneRate = [self.inc_prune_rate(l, dependencies) for i in range(channelsLeftToPrune)][-1]
+                [self.inc_prune_rate(l, dependencies, False) for i in range(channelsLeftToPrune)][-1]
 
         ### update layerSizes        
         module = [m for n,m in self.model.named_modules() if n == blockName][0]
@@ -521,14 +527,10 @@ class ResNet20PruningDependency(BasicPruning):
             
         prevBlock = [self.depBlock.linkedModules[i-1][1] for i,x in enumerate(self.depBlock.linkedModules)\
                 if x[1] == blockName][0]
-        nextBlock = [self.depBlock.linkedModules[i+1][1] for i,x in enumerate(self.depBlock.linkedModules)\
-                if x[1] == blockName][0]
-        currIpChannels = self.layerSizes[f"{blockName}.{internalLayerNames[0]}"][1]
-        currOpChannels = self.layerSizes[f"{nextBlock}.{internalLayerNames[2]}"][0]
         
         prevLayer = f"{prevBlock}.{internalLayerNames[2]}"
         currLayer = f"{blockName}.{internalLayerNames[2]}"
-        nextLayer = f"{nextBlock}.{internalLayerNames[0]}"
+        currIpChannels = self.layerSizes[f"{blockName}.{internalLayerNames[0]}"][1]
 
         for nLayer,_ in self.depBlock.linkedConvAndFc[currLayer]:
             self.layerSizes[nLayer][1] = currIpChannels
@@ -548,6 +550,15 @@ class ResNet20PruningDependency(BasicPruning):
         newLCF[prevLayer] = self.depBlock.linkedConvAndFc[currLayer]
         self.depBlock.linkedConvAndFc = newLCF
         self.depBlock.linkedConvs = self.depBlock.linkedConvAndFc
+
+        ### updat pruned params and get current prune rate
+        # self.write_net(printFileLoc=False)
+        # pModel = self.import_pruned_model()
+        # currentPruneRate, prunedMem, _ = self.prune_rate(pModel)
+        # prunedParams = (prunedMem*1e6)/4
+        # self.currParams = prunedParams
+        self.currParams = sum([np.prod(x) for _,x in self.layerSizes.items()])
+        currentPruneRate = ((self.totalParams - self.currParams)/self.totalParams)*100.
         
         return currentPruneRate
     #}}}
@@ -625,10 +636,15 @@ class ResNet20PruningDependency(BasicPruning):
     
     def remove_filters_and_layers(self, localRanking, globalRanking, dependencies, groupPruningLimits):
     #{{{
+        def check_prune_rate(cpr): 
+            if cpr < float(self.params.pruner['pruning_perc']): 
+                return True
+            return False
+        
         listIdx = 0
         currentPruneRate = 0
         self.currParams = self.totalParams
-        while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
+        while check_prune_rate(currentPruneRate) and (listIdx < len(globalRanking)):
             layerName, filterNum, _ = globalRanking[listIdx]
 
             depLayers = []
@@ -654,10 +670,13 @@ class ResNet20PruningDependency(BasicPruning):
                     # downsamples the activations --> necessary
                     if (layerName in localRanking.keys()):
                         if (len(localRanking[layerName]) <= pruningLimit):
-                            blockName = '.'.join(layerName.split('.')[:-1])
+                            blockName = [x[1] for x in self.depBlock.linkedModules if x[1] in layerName][0] 
                             if i != 0 and blockName not in self.blocksToRemove:
                                 self.blocksToRemove.append(blockName)
-                                currentPruneRate = self.inc_prune_rate_block(blockName, localRanking, dependencies)
+                                currentPruneRate = self.inc_prune_rate_block(blockName, localRanking,\
+                                        dependencies)
+                                if not check_prune_rate(currentPruneRate): 
+                                    break
                             continue
                     else:
                         continue
@@ -673,7 +692,82 @@ class ResNet20PruningDependency(BasicPruning):
             
             listIdx += 1
         
-        print(f"Blocks to remove: {self.blocksToRemove}")
+        print(f"Pruned blocks: {self.blocksToRemove}")
         return self.channelsToPrune
+    #}}}
+    
+    def write_net(self, printFileLoc=True):
+    #{{{
+        if printFileLoc:
+            print("Pruned model written to {}".format(self.filePath))
+        channelsPruned = {l:len(v) for l,v in self.channelsToPrune.items()}
+        
+        if 'googlenet' in self.params.arch:
+            self.writer = GoogLeNetWriter(self.netName, channelsPruned, self.depBlock, self.filePath,\
+                    self.layerSizes)
+        else:
+            self.writer = Writer(self.netName, channelsPruned, self.depBlock, self.filePath, self.layerSizes)
+        
+        lTypes, lNames = zip(*self.depBlock.linkedModules)
+        prunedModel = copy.deepcopy(self.model)
+        for n,m in prunedModel.named_modules(): 
+            # detect dependent modules and convs
+            if any(n == x for x in lNames):
+                idx = lNames.index(n) 
+                lType = lTypes[idx]
+                self.writer.write_module(lType, n, m)
+            
+            # ignore recursion into dependent modules
+            elif any(f'{x}.' in n for t,x in self.depBlock.linkedModules):
+                continue
+
+            # all other modules in the network
+            else:
+                try: 
+                    if not any(x in n for x in self.blocksToRemove):
+                        self.writer.write_module(type(m).__name__.lower(), n, m)
+                except KeyError:
+                    if self.verbose:
+                        print("CRITICAL WARNING : layer found ({}) that is not handled in writers. This could potentially break the network.".format(type(m)))
+        
+        self.writer.write_network()       
+    #}}}
+    
+    def transfer_weights(self, oModel, pModel): 
+    #{{{
+        lTypes, lNames = zip(*self.depBlock.linkedModules)
+        
+        pModStateDict = pModel.state_dict() 
+
+        if 'googlenet' in self.params.arch:
+            self.wtu = GoogLeNetWeightTransferUnit(self, pModStateDict, self.channelsToPrune, self.depBlock,\
+                    self.layerSizes)
+        else:
+            self.wtu = WeightTransferUnit(self, pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
+        
+        mutableOModel = copy.deepcopy(oModel)
+        for n,m in mutableOModel.named_modules(): 
+            [x.detach_() for x in m.parameters()]
+            # detect dependent modules and convs
+            if any(n == x for x in lNames):
+                idx = lNames.index(n) 
+                lType = lTypes[idx]
+                self.wtu.transfer_weights(lType, n, m)
+            
+            # ignore recursion into dependent modules
+            elif any(f'{x}.' in n for t,x in self.depBlock.linkedModules):
+                continue
+            
+            # all other modules in the network
+            else:
+                try: 
+                    if not any(x in n for x in self.blocksToRemove):
+                        self.wtu.transfer_weights(type(m).__name__.lower(), n, m)
+                except KeyError as e:
+                    if self.verbose:
+                        print(f"CRITICAL WARNING : layer found ({type(m)}) that is not handled in weight transfer. This could potentially break the network.")
+        
+        pModel.load_state_dict(pModStateDict)
+        return pModel 
     #}}}
 #}}}

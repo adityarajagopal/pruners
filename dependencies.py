@@ -386,7 +386,6 @@ class Inception(DependencyCalculator):
 #}}}
 
 class DependencyBlock(object):
-#{{{
     def __init__(self, model):
     #{{{
         self.model = model
@@ -584,5 +583,4 @@ class DependencyBlock(object):
 
         return intDeps,extDeps
     #}}}
-#}}}
 

@@ -36,6 +36,7 @@ class BasicPruning(ABC):
         self.params = params
         self.model = model
         self.verbose = verbose
+        self.importedPruNetModules = []
 
         self.minFiltersInLayer = 2
 
@@ -115,7 +116,11 @@ class BasicPruning(ABC):
 
     def import_pruned_model(self):
     #{{{
-        module = importlib.import_module(self.importPath)
+        module = importlib.import_module(self.importPath) 
+        if module not in self.importedPruNetModules:
+            self.importedPruNetModules.append(module)
+        else: 
+            importlib.reload(module)
         pModel = module.__dict__[self.netName]
         prunedModel = pModel(num_classes=100)
         return prunedModel
@@ -547,42 +552,7 @@ class BasicPruning(ABC):
                 except KeyError:
                     if self.verbose:
                         print("CRITICAL WARNING : layer found ({}) that is not handled in writers. This could potentially break the network.".format(type(m)))
-            
-        self.writer.write_network()       
-    #}}}
-    
-    def write_net_layer_prune(self):
-    #{{{
-        print("Pruned model written to {}".format(self.filePath))
-        channelsPruned = {l:len(v) for l,v in self.channelsToPrune.items()}
         
-        if 'googlenet' in self.params.arch:
-            self.writer = GoogLeNetWriter(self.netName, channelsPruned, self.depBlock, self.filePath,\
-                    self.layerSizes)
-        else:
-            self.writer = Writer(self.netName, channelsPruned, self.depBlock, self.filePath, self.layerSizes)
-        
-        lTypes, lNames = zip(*self.depBlock.linkedModules)
-        prunedModel = copy.deepcopy(self.model)
-        for n,m in prunedModel.named_modules(): 
-            # detect dependent modules and convs
-            if any(n == x for x in lNames):
-                idx = lNames.index(n) 
-                lType = lTypes[idx]
-                self.writer.write_module(lType, n, m)
-            
-            # ignore recursion into dependent modules
-            elif any(f'{x}.' in n for t,x in self.depBlock.linkedModules):
-                continue
-
-            # all other modules in the network
-            else:
-                try: 
-                    self.writer.write_module(type(m).__name__.lower(), n, m)
-                except KeyError:
-                    if self.verbose:
-                        print("CRITICAL WARNING : layer found ({}) that is not handled in writers. This could potentially break the network.".format(type(m)))
-            
         self.writer.write_network()       
     #}}}
     
