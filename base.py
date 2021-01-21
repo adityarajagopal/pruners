@@ -10,6 +10,7 @@ import functools
 import importlib
 import subprocess
 from tqdm import tqdm
+from collections import Counter
 from abc import ABC, abstractmethod
 
 # get current directory and append to path
@@ -27,16 +28,19 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+import src.adapt.lego.utils as utils
+
 class BasicPruning(ABC):
-#{{{
-    def __init__(self, params, model):
+    def __init__(self, params, model, verbose=False):
     #{{{
         self.params = params
         self.model = model
+        self.verbose = verbose
 
         self.minFiltersInLayer = 2
 
         self.metricValues = []
+        self.blocksToRemove = []
         self.channelsToPrune = {}
         self.gpu_list = [int(x) for x in self.params.gpu_id.split(',')]
         
@@ -44,7 +48,8 @@ class BasicPruning(ABC):
         self.layerSizes = {}
         
         # create model directory and file
-        self.dirName = '{}/{}/{}'.format(params.pruner['model_path'], params.dataset, params.pruner['subset_name'])
+        self.dirName = '{}/{}/{}'.format(params.pruner['model_path'], params.dataset,\
+                params.pruner['subset_name'])
         self.filePath = os.path.join(self.dirName, self.fileName)
         
         ## create dir if it doesn't exist
@@ -54,7 +59,8 @@ class BasicPruning(ABC):
         self.depBlock = dependSrc.DependencyBlock(model)
         self.get_layer_params()
 
-        self.importPath = '{}.{}.{}'.format('.'.join(params.pruner['project_dir'].split('/')), '.'.join(self.dirName.split('/')), self.fileName.split('.')[0])
+        self.importPath = '{}.{}.{}'.format('.'.join(params.pruner['project_dir'].split('/')),\
+                '.'.join(self.dirName.split('/')), self.fileName.split('.')[0])
     #}}} 
     
     def get_layer_params(self):
@@ -119,8 +125,9 @@ class BasicPruning(ABC):
     #{{{
         # pruning based on l1 norm of weights
         if self.params.pruner['mode'] == 'l1-norm':
-            tqdm.write("Pruning filters: l1-norm")
-            channelsPruned = self.structured_l1_weight(model)
+            tqdm.write(f"Pruning filters: l1-norm - Pruning Level {self.params.pruner['pruning_perc']}")
+            channelsPruned = self.structured_l1_weight_layer(model)\
+                    if eval(self.params.pruner['prune_layers']) else self.structured_l1_weight(model)
             self.write_net()
             prunedModel = self.import_pruned_model()
             prunedModel = self.transfer_weights(model, prunedModel)
@@ -276,7 +283,6 @@ class BasicPruning(ABC):
         
         dependencies = internalDeps + externalDeps
         self.remove_filters(localRanking, globalRanking, dependencies, groupPruningLimits)
-        # self.remove_filters_and_layers(localRanking, globalRanking, dependencies, groupPruningLimits)
 
         return self.channelsToPrune
     #}}}
@@ -413,59 +419,6 @@ class BasicPruning(ABC):
         return self.channelsToPrune
     #}}}
     
-    def remove_filters_and_layers(self, localRanking, globalRanking, dependencies, groupPruningLimits):
-    #{{{
-        listIdx = 0
-        count0 = 0
-        currentPruneRate = 0
-        self.currParams = self.totalParams
-        blocksToRemove = []
-        while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
-            layerName, filterNum, _ = globalRanking[listIdx]
-
-            depLayers = []
-            pruningLimit = self.minFiltersInLayer
-            for i, group in enumerate(dependencies):
-                if layerName in group:            
-                    depLayers = group
-                    pruningLimit = groupPruningLimits[i]
-                    break
-            # if layer not in group, just remove filter from layer 
-            # if layer is in a dependent group remove corresponding filter from each layer
-            depLayers = [layerName] if depLayers == [] else depLayers
-            if hasattr(self.depBlock, 'ignore'): 
-                netInst = type(self.model.module)
-                ignoreLayers = any(x in self.depBlock.ignore[netInst] for x in depLayers)
-            else:
-                ignoreLayers = False
-            if not ignoreLayers:
-                for layerName in depLayers:
-                    # case where you want to skip layers
-                    # if layers are dependent, skipping one means skipping all the dependent layers
-                    if len(localRanking[layerName]) <= pruningLimit:
-                        blockName = '.'.join(layerName.split('.')[:-1])
-                        if blockName not in blocksToRemove:
-                            blocksToRemove.append(blockName)
-                        count0 += 1
-                        continue
-               
-                    # if filter has already been pruned, continue
-                    # could happen to due to dependencies
-                    if filterNum in self.channelsToPrune[layerName]:
-                        continue 
-                    
-                    localRanking[layerName].pop(0)
-                    self.channelsToPrune[layerName].append(filterNum)
-                    
-                    currentPruneRate = self.inc_prune_rate(layerName) 
-            
-            listIdx += 1
-        
-        print(f"Number of times min filter count hit = {count0}")
-        print(f"Blocks to remove: {blocksToRemove}")
-        return self.channelsToPrune
-    #}}}
-    
     def remove_filters(self, localRanking, globalRanking, dependencies, groupPruningLimits):
     #{{{
         listIdx = 0
@@ -544,7 +497,43 @@ class BasicPruning(ABC):
                 try: 
                     self.writer.write_module(type(m).__name__.lower(), n, m)
                 except KeyError:
-                    print("CRITICAL WARNING : layer found ({}) that is not handled in writers. This could potentially break the network.".format(type(m)))
+                    if self.verbose:
+                        print("CRITICAL WARNING : layer found ({}) that is not handled in writers. This could potentially break the network.".format(type(m)))
+            
+        self.writer.write_network()       
+    #}}}
+    
+    def write_net_layer_prune(self):
+    #{{{
+        print("Pruned model written to {}".format(self.filePath))
+        channelsPruned = {l:len(v) for l,v in self.channelsToPrune.items()}
+        
+        if 'googlenet' in self.params.arch:
+            self.writer = GoogLeNetWriter(self.netName, channelsPruned, self.depBlock, self.filePath,\
+                    self.layerSizes)
+        else:
+            self.writer = Writer(self.netName, channelsPruned, self.depBlock, self.filePath, self.layerSizes)
+        
+        lTypes, lNames = zip(*self.depBlock.linkedModules)
+        prunedModel = copy.deepcopy(self.model)
+        for n,m in prunedModel.named_modules(): 
+            # detect dependent modules and convs
+            if any(n == x for x in lNames):
+                idx = lNames.index(n) 
+                lType = lTypes[idx]
+                self.writer.write_module(lType, n, m)
+            
+            # ignore recursion into dependent modules
+            elif any(f'{x}.' in n for t,x in self.depBlock.linkedModules):
+                continue
+
+            # all other modules in the network
+            else:
+                try: 
+                    self.writer.write_module(type(m).__name__.lower(), n, m)
+                except KeyError:
+                    if self.verbose:
+                        print("CRITICAL WARNING : layer found ({}) that is not handled in writers. This could potentially break the network.".format(type(m)))
             
         self.writer.write_network()       
     #}}}
@@ -579,7 +568,8 @@ class BasicPruning(ABC):
                 try: 
                     self.wtu.transfer_weights(type(m).__name__.lower(), n, m)
                 except KeyError as e:
-                    print(f"CRITICAL WARNING : layer found ({type(m)}) that is not handled in weight transfer. This could potentially break the network.")
+                    if self.verbose:
+                        print(f"CRITICAL WARNING : layer found ({type(m)}) that is not handled in weight transfer. This could potentially break the network.")
         
         pModel.load_state_dict(pModStateDict)
         return pModel 
@@ -593,4 +583,3 @@ class BasicPruning(ABC):
         else:
             return False
     #}}}
-#}}}
