@@ -213,6 +213,54 @@ class BasicPruning(ABC):
         return 100.*((self.totalParams - prunedParams) / self.totalParams), (prunedParams * 4) / 1e6, (self.totalParams * 4)/1e6
     #}}}        
     
+    def inc_prune_rate(self, layerName, dependencies):
+    #{{{
+        lParam = str(layerName)
+        currLayerSize = self.layerSizes[lParam]
+        paramsPruned = currLayerSize[1] * currLayerSize[2] * currLayerSize[3]
+        # remove 1 output filter from current layer
+        self.layerSizes[lParam][0] -= 1 
+        
+        # check if it is at the head of a dependency group, i.e. it has a downsampling layer
+        # if any(x.index(layerName) == 0 for x in dependencies if layerName in x):
+        #     blockName = '.'.join(layerName.split('.')[:-1])
+        #     module = [m for n,m in self.model.named_modules() if n == blockName][0]
+        #     instanceIdx = [isinstance(module, x) for x in self.depBlock.instances].index(True)
+        #     dsInstName = self.depBlock.dsLayers[instanceIdx][0]
+        #     dsLayer = [x for x,p in module.named_modules() if dsInstName in x and\
+        #             isinstance(p, torch.nn.Conv2d)][0]
+        #     dsLayerName = f"{blockName}.{dsLayer}" 
+        #     self.layerSizes[dsLayerName][0] -= 1
+        #     dsLayerSize = self.layerSizes[dsLayerName]
+        #     paramsPruned += dsLayerSize[1] * dsLayerSize[2] * dsLayerSize[3]
+
+        nextLayerDetails = self.depBlock.linkedConvAndFc[lParam]
+        for (nextLayer, groups) in nextLayerDetails:
+            nextLayerSize = self.layerSizes[nextLayer]
+
+            # check if FC layer
+            if len(nextLayerSize) == 2: 
+                finalLayers = [k for k,v in self.depBlock.linkedConvAndFc.items() if v[0][0] == nextLayer]
+                currOFMSize = sum([self.layerSizes[x][0] for x in finalLayers]) 
+                fcParamsPruned = int(nextLayerSize[1] / (currOFMSize + 1))
+                paramsPruned += fcParamsPruned * nextLayerSize[0]
+                self.layerSizes[nextLayer][1] -= fcParamsPruned
+            else:
+                #TODO:
+                # this is assuming we only have either non-grouped convolutions or dw convolutions
+                # have to change to accomodate grouped convolutions
+                nextOpChannels = nextLayerSize[0] if groups == 1 else 1
+                paramsPruned += nextOpChannels*nextLayerSize[2]*nextLayerSize[3]
+                
+                # remove 1 input activation from next layer if it is not a dw conv
+                if groups == 1:
+                    self.layerSizes[nextLayer][1] -= 1
+            
+        self.currParams -= paramsPruned
+        
+        return (100. * (1. - (self.currParams / self.totalParams)))
+    #}}}
+    
     def calculate_metric(self, param):
     #{{{
         #l1-norm

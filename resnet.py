@@ -465,14 +465,16 @@ class ResNet20PruningDependency(BasicPruning):
         if any(x.index(layerName) == 0 for x in dependencies if layerName in x):
             blockName = '.'.join(layerName.split('.')[:-1])
             module = [m for n,m in self.model.named_modules() if n == blockName][0]
-            instanceIdx = [isinstance(module, x) for x in self.depBlock.instances].index(True)
-            dsInstName = self.depBlock.dsLayers[instanceIdx][0]
-            dsLayer = [x for x,p in module.named_modules() if dsInstName in x and\
-                    isinstance(p, torch.nn.Conv2d)][0]
-            dsLayerName = f"{blockName}.{dsLayer}" 
-            self.layerSizes[dsLayerName][0] -= 1
-            dsLayerSize = self.layerSizes[dsLayerName]
-            paramsPruned += dsLayerSize[1] * dsLayerSize[2] * dsLayerSize[3]
+            instances = [isinstance(module, x) for x in self.depBlock.instances]
+            if True in instances: 
+                instanceIdx = instance.index(True)
+                dsInstName = self.depBlock.dsLayers[instanceIdx][0]
+                dsLayer = [x for x,p in module.named_modules() if dsInstName in x and\
+                        isinstance(p, torch.nn.Conv2d)][0]
+                dsLayerName = f"{blockName}.{dsLayer}" 
+                self.layerSizes[dsLayerName][0] -= 1
+                dsLayerSize = self.layerSizes[dsLayerName]
+                paramsPruned += dsLayerSize[1] * dsLayerSize[2] * dsLayerSize[3]
 
         nextLayerDetails = self.depBlock.linkedConvAndFc[lParam]
         for (nextLayer, groups) in nextLayerDetails:
@@ -569,6 +571,55 @@ class ResNet20PruningDependency(BasicPruning):
         dependencies = internalDeps + externalDeps
         self.remove_filters_and_layers(localRanking, globalRanking, dependencies, groupPruningLimits)
 
+        return self.channelsToPrune
+    #}}}
+    
+    def remove_filters(self, localRanking, globalRanking, dependencies, groupPruningLimits):
+    #{{{
+        listIdx = 0
+        count0 = 0
+        currentPruneRate = 0
+        self.currParams = self.totalParams
+        while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
+            layerName, filterNum, _ = globalRanking[listIdx]
+
+            depLayers = []
+            pruningLimit = self.minFiltersInLayer
+            for i, group in enumerate(dependencies):
+                if layerName in group:            
+                    depLayers = group
+                    pruningLimit = groupPruningLimits[i]
+                    break
+            
+            # if layer not in group, just remove filter from layer 
+            # if layer is in a dependent group remove corresponding filter from each layer
+            depLayers = [layerName] if depLayers == [] else depLayers
+            if hasattr(self.depBlock, 'ignore'): 
+                netInst = type(self.model.module)
+                ignoreLayers = any(x in self.depBlock.ignore[netInst] for x in depLayers)
+            else:
+                ignoreLayers = False
+            if not ignoreLayers:
+                for layerName in depLayers:
+                    # case where you want to skip layers
+                    # if layers are dependent, skipping one means skipping all the dependent layers
+                    if len(localRanking[layerName]) <= pruningLimit:
+                        count0 += 1
+                        continue
+               
+                    # if filter has already been pruned, continue
+                    # could happen to due to dependencies
+                    if filterNum in self.channelsToPrune[layerName]:
+                        continue 
+                    
+                    localRanking[layerName].pop(0)
+                    self.channelsToPrune[layerName].append(filterNum)
+                    
+                    currentPruneRate = self.inc_prune_rate(layerName, dependencies) 
+            
+            listIdx += 1
+        
+        print(f"Number of times min filter count hit = {count0}")
         return self.channelsToPrune
     #}}}
     
