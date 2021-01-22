@@ -33,7 +33,7 @@ def ofa_residual(**kwargs):
         dependencies.DependencyBlock.update_block_names(block, **kwargs)
         dependencies.DependencyBlock.register_dependency_calculator(kwargs['lType'], dependencies.Residual())
         writers.Writer.register_writer(kwargs['lType'], writers.ofa_residual)
-        weight_transfer.WeightTransferUnit.register_transfer_func(kwargs['lType'], weight_transfer.ofa_residual)
+        weight_transfer.WeightTransferUnit.register_transfer_func(kwargs['lType'], weight_transfer.residual)
         return block
     return decorator
 #}}}
