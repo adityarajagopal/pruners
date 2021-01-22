@@ -56,6 +56,15 @@ class WeightTransferUnit(object):
         self.wtFuncs[lType](self, modName, module)
 #}}}
 
+class ResNetWeightTransferUnit(WeightTransferUnit): 
+#{{{
+    def __init__(self, app, prunedModel, channelsPruned, depBlk, layerSizes): 
+        super().__init__(app, prunedModel, channelsPruned, depBlk, layerSizes)
+        
+        self.wtFuncs['basic'] = nn_conv2d_resnets
+        self.wtFuncs['batchnorm2d'] = nn_batchnorm2d_resnets
+#}}}
+
 class GoogLeNetWeightTransferUnit(WeightTransferUnit): 
 #{{{
     def __init__(self, app, prunedModel, channelsPruned, depBlk, layerSizes): 
@@ -63,7 +72,8 @@ class GoogLeNetWeightTransferUnit(WeightTransferUnit):
         self.wtFuncs['linear'] = nn_linear_googlenet
 #}}}
 
-# torch.nn modules
+### generic wtu function for torch.nn modules
+#{{{
 def nn_conv2d_smart_update(wtu, modName, module, ipChannelsPruned=None, opChannelsPruned=None, dw=False): 
 #{{{
     modName = modName.replace('.', '_')
@@ -165,7 +175,7 @@ def nn_batchnorm2d_smart_update(wtu, modName, module):
 def nn_conv2d(wtu, modName, module, ipChannelsPruned=None, opChannelsPruned=None, dw=False): 
 #{{{
     modName = modName.replace('.', '_')
-    
+
     dw = dw or (module.in_channels == module.groups)
     allIpChannels = list(range(module.in_channels))
     allOpChannels = list(range(module.out_channels))
@@ -287,8 +297,62 @@ def nn_logsoftmax(wtu, modName, module):
 #{{{
     pass
 #}}}
+#}}}
 
-# custom modules
+### resnets specific function for torch.nn modules
+#{{{
+def nn_conv2d_resnets(wtu, modName, module, ipChannelsPruned=None, opChannelsPruned=None, dw=False): 
+#{{{
+    modName = modName.replace('.', '_')
+
+    dw = dw or (module.in_channels == module.groups)
+    allIpChannels = list(range(module.in_channels))
+    allOpChannels = list(range(module.out_channels))
+    
+    # TODO: the naming needs to change to wtu.ipChannelsKept as we are no long storing channels pruned
+    # but keep for now for testing
+    if not dw:
+        if ipChannelsPruned is None:
+            ipChannels = wtu.ipChannelsPruned if wtu.ipChannelsPruned != [] else allIpChannels  
+        else: 
+            ipChannels = ipChannelsPruned
+    else: 
+        ipChannels = [0]
+
+    if opChannelsPruned is None:
+        opPruned = wtu.channelsPruned[modName] 
+        opChannels = list(set(allOpChannels) - set(opPruned))
+    else: 
+        opChannels = opChannelsPruned
+    
+    wtu.ipChannelsPruned = opChannels
+
+    pWeight = f'{wtu.prefix}{modName}.weight'
+    pBias = f'{wtu.prefix}{modName}.bias'
+    wtu.pModel[pWeight] = module._parameters['weight'][opChannels,:][:,ipChannels]
+    if module._parameters['bias'] is not None:
+        wtu.pModel[pBias] = module._parameters['bias'][opChannels]
+
+    wtu.prevLayer = modName
+#}}}
+
+def nn_batchnorm2d_resnets(wtu, modName, module): 
+#{{{
+    modName = modName.replace('.', '_')
+    
+    allFeatures = list(range(module.num_features))
+    numFeaturesKept = wtu.ipChannelsPruned
+    
+    key = f'{wtu.prefix}{modName}'
+    wtu.pModel['{}.weight'.format(key)] = module._parameters['weight'][numFeaturesKept]
+    wtu.pModel['{}.bias'.format(key)] = module._parameters['bias'][numFeaturesKept]
+    wtu.pModel['{}.running_mean'.format(key)] = module._buffers['running_mean'][numFeaturesKept]
+    wtu.pModel['{}.running_var'.format(key)] = module._buffers['running_var'][numFeaturesKept]
+    wtu.pModel['{}.num_batches_tracked'.format(key)] = module._buffers['num_batches_tracked']
+#}}}
+#}}}
+
+### custom modules
 def residual_backbone(wtu, modName, module, main_branch, residual_branch, aggregation_op):
 #{{{
     inputToBlock = wtu.ipChannelsPruned
@@ -354,52 +418,23 @@ def residual(wtu, modName, module):
     def main_branch(n, m, fullName, wtu): 
     #{{{
         if isinstance(m, nn.Conv2d): 
-            nn_conv2d(wtu, fullName, m)
-            # start = time.time()
+            nn_conv2d_resnets(wtu, fullName, m)
             # nn_conv2d_smart_update(wtu, fullName, m)
-            # print(f"Update took {time.time() - start}")
 
         elif isinstance(m, nn.BatchNorm2d): 
-            nn_batchnorm2d(wtu, fullName, m)
+            nn_batchnorm2d_resnets(wtu, fullName, m)
             # nn_batchnorm2d_smart_update(wtu, fullName, m)
     #}}}
     
     def residual_branch(n, m, fullName, wtu, ipToBlock, opOfBlock): 
     #{{{
         if isinstance(m, nn.Conv2d): 
-            nn_conv2d(wtu, fullName, m, ipToBlock, opOfBlock)
-            # start = time.time()
+            nn_conv2d_resnets(wtu, fullName, m, ipToBlock, opOfBlock)
             # nn_conv2d_smart_update(wtu, fullName, m, ipToBlock, opOfBlock)
-            # print(f"Update took {time.time() - start}")
             
         elif isinstance(m, nn.BatchNorm2d):
-            nn_batchnorm2d(wtu, fullName, m)
+            nn_batchnorm2d_resnets(wtu, fullName, m)
             # nn_batchnorm2d_smart_update(wtu, fullName, m)
-    #}}}
-
-    residual_backbone(wtu, modName, module, main_branch, residual_branch, None)
-#}}}
-
-def ofa_residual(wtu, modName, module):
-#{{{
-    def main_branch(n, m, fullName, wtu): 
-    #{{{
-        fullName = fullName.replace('.','_')
-        if isinstance(m, nn.Conv2d): 
-            nn_conv2d(wtu, fullName, m)
-
-        elif isinstance(m, nn.BatchNorm2d): 
-            nn_batchnorm2d(wtu, fullName, m)
-    #}}}
-    
-    def residual_branch(n, m, fullName, wtu, ipToBlock, opOfBlock): 
-    #{{{
-        fullName = fullName.replace('.', '_')
-        if isinstance(m, nn.Conv2d): 
-            nn_conv2d(wtu, fullName, m, ipToBlock, opOfBlock)
-            
-        elif isinstance(m, nn.BatchNorm2d):
-            nn_batchnorm2d(wtu, fullName, m)
     #}}}
 
     residual_backbone(wtu, modName, module, main_branch, residual_branch, None)
@@ -476,7 +511,8 @@ def fire(wtu, modName, module):
             break
 #}}}
 
-def split_and_aggregate_backbone_new(wtu, parentModName, parentModule, branchStarts, branchProcs, aggregation_op): 
+def split_and_aggregate_backbone_inception(wtu, parentModName, parentModule, branchStarts, branchProcs,\
+        aggregation_op): 
 #{{{
     assert len(branchStarts) == len(branchProcs),\
             'For each branch a processing function must be provided - branches = {}, procFuns = {}'\
@@ -527,5 +563,5 @@ def inception(wtu, modName, module):
     
     idx = wtu.depBlk.instances.index(type(module))
     convs = wtu.depBlk.convs[idx]
-    split_and_aggregate_backbone_new(wtu, modName, module, convs, [basic,basic,basic,basic], aggregation_op)
+    split_and_aggregate_backbone_inception(wtu, modName, module, convs, [basic,basic,basic,basic], aggregation_op)
 #}}}
