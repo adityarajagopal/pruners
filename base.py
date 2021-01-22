@@ -21,7 +21,7 @@ sys.path.append(currDir)
 
 import dependencies as dependSrc
 from model_writers import Writer, GoogLeNetWriter
-from weight_transfer import WeightTransferUnit, GoogLeNetWeightTransferUnit
+from weight_transfer import WeightTransferUnit, ResNetWeightTransferUnit, GoogLeNetWeightTransferUnit
 
 import numpy as np
 
@@ -218,7 +218,7 @@ class BasicPruning(ABC):
         return 100.*((self.totalParams - prunedParams) / self.totalParams), (prunedParams * 4) / 1e6, (self.totalParams * 4)/1e6
     #}}}        
     
-    def inc_prune_rate(self, layerName, dependencies):
+    def inc_prune_rate(self, layerName):
     #{{{
         lParam = str(layerName)
         currLayerSize = self.layerSizes[lParam]
@@ -226,19 +226,6 @@ class BasicPruning(ABC):
         # remove 1 output filter from current layer
         self.layerSizes[lParam][0] -= 1 
         
-        # check if it is at the head of a dependency group, i.e. it has a downsampling layer
-        # if any(x.index(layerName) == 0 for x in dependencies if layerName in x):
-        #     blockName = '.'.join(layerName.split('.')[:-1])
-        #     module = [m for n,m in self.model.named_modules() if n == blockName][0]
-        #     instanceIdx = [isinstance(module, x) for x in self.depBlock.instances].index(True)
-        #     dsInstName = self.depBlock.dsLayers[instanceIdx][0]
-        #     dsLayer = [x for x,p in module.named_modules() if dsInstName in x and\
-        #             isinstance(p, torch.nn.Conv2d)][0]
-        #     dsLayerName = f"{blockName}.{dsLayer}" 
-        #     self.layerSizes[dsLayerName][0] -= 1
-        #     dsLayerSize = self.layerSizes[dsLayerName]
-        #     paramsPruned += dsLayerSize[1] * dsLayerSize[2] * dsLayerSize[3]
-
         nextLayerDetails = self.depBlock.linkedConvAndFc[lParam]
         for (nextLayer, groups) in nextLayerDetails:
             nextLayerSize = self.layerSizes[nextLayer]
