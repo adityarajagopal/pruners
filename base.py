@@ -462,7 +462,6 @@ class BasicPruning(ABC):
     def remove_filters(self, localRanking, globalRanking, dependencies, groupPruningLimits):
     #{{{
         listIdx = 0
-        count0 = 0
         currentPruneRate = 0
         self.currParams = self.totalParams
         while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
@@ -489,7 +488,6 @@ class BasicPruning(ABC):
                     # case where you want to skip layers
                     # if layers are dependent, skipping one means skipping all the dependent layers
                     if len(localRanking[layerName]) <= pruningLimit:
-                        count0 += 1
                         continue
                
                     # if filter has already been pruned, continue
@@ -504,7 +502,6 @@ class BasicPruning(ABC):
             
             listIdx += 1
         
-        print(f"Number of times min filter count hit = {count0}")
         return self.channelsToPrune
     #}}}
     

@@ -165,7 +165,6 @@ class ResNet20PruningDependency(BasicPruning):
     def remove_filters(self, localRanking, globalRanking, dependencies, groupPruningLimits):
     #{{{
         listIdx = 0
-        count0 = 0
         currentPruneRate = 0
         self.currParams = self.totalParams
         while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
@@ -192,7 +191,6 @@ class ResNet20PruningDependency(BasicPruning):
                     # case where you want to skip layers
                     # if layers are dependent, skipping one means skipping all the dependent layers
                     if len(localRanking[layerName]) <= pruningLimit:
-                        count0 += 1
                         continue
                
                     # if filter has already been pruned, continue
@@ -207,7 +205,6 @@ class ResNet20PruningDependency(BasicPruning):
             
             listIdx += 1
         
-        print(f"Number of times min filter count hit = {count0}")
         return self.channelsToPrune
     #}}}
     
@@ -225,10 +222,11 @@ class ResNet20PruningDependency(BasicPruning):
             layerName, filterNum, _ = globalRanking[listIdx]
 
             depLayers = []
-            groupIdx = -1
+            outputOfBlock = False
             pruningLimit = self.minFiltersInLayer
             for i, group in enumerate(dependencies):
                 if layerName in group:            
+                    outputOfBlock = True
                     depLayers = group
                     groupIdx = group.index(layerName)
                     pruningLimit = groupPruningLimits[i][groupIdx]
@@ -244,15 +242,16 @@ class ResNet20PruningDependency(BasicPruning):
                 # downsamples the activations --> necessary
                 # len(depLayers) == 1 ensures that for a layer not in a dependency group block is still pruned
                 if (layerName in localRanking.keys()):
-                    if (len(localRanking[layerName]) <= pruningLimit):
-                        blockName = [_blockName for _, _blockName in self.depBlock.linkedModules\
-                                if f"{_blockName}." in layerName][0] 
-                        if (i != 0 or len(depLayers) == 1) and blockName not in self.blocksToRemove:
-                            self.blocksToRemove.append(blockName)
-                            currentPruneRate = self.inc_prune_rate_block(blockName, localRanking,\
-                                    dependencies)
-                            if not check_prune_rate(currentPruneRate): 
-                                break
+                    if len(localRanking[layerName]) <= pruningLimit:
+                        if outputOfBlock:
+                            blockName = [_blockName for _, _blockName in self.depBlock.linkedModules\
+                                    if f"{_blockName}." in layerName][0] 
+                            if (i != 0 or len(depLayers) == 1) and blockName not in self.blocksToRemove:
+                                self.blocksToRemove.append(blockName)
+                                currentPruneRate = self.inc_prune_rate_block(blockName, localRanking,\
+                                        dependencies)
+                                if not check_prune_rate(currentPruneRate): 
+                                    break
                         continue
                 else:
                     continue

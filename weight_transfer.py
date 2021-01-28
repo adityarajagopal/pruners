@@ -63,6 +63,7 @@ class ResNetWeightTransferUnit(WeightTransferUnit):
         
         self.wtFuncs['basic'] = nn_conv2d_resnets
         self.wtFuncs['batchnorm2d'] = nn_batchnorm2d_resnets
+        self.wtFuncs['linear'] = nn_linear_resnets
 #}}}
 
 class GoogLeNetWeightTransferUnit(WeightTransferUnit): 
@@ -349,6 +350,31 @@ def nn_batchnorm2d_resnets(wtu, modName, module):
     wtu.pModel['{}.running_mean'.format(key)] = module._buffers['running_mean'][numFeaturesKept]
     wtu.pModel['{}.running_var'.format(key)] = module._buffers['running_var'][numFeaturesKept]
     wtu.pModel['{}.num_batches_tracked'.format(key)] = module._buffers['num_batches_tracked']
+#}}}
+
+def nn_linear_resnets(wtu, modName, module): 
+#{{{
+    modName = modName.replace('.', '_')
+    
+    inFeatures = wtu.layerSizes[modName][1]
+    prevOutChannels = wtu.layerSizes[wtu.prevLayer][0]
+    spatialSize = int(inFeatures / prevOutChannels)
+
+    allIpChannels = list(range(int(module.in_features/spatialSize)))
+    ipChannelsKept = wtu.ipChannelsPruned
+    
+    key = f'{wtu.prefix}{modName}'
+    for i,channel in enumerate(ipChannelsKept):
+        sOrig = spatialSize * channel
+        eOrig = sOrig + spatialSize
+        sPrune = spatialSize * i
+        ePrune = sPrune + spatialSize
+        wtu.pModel['{}.weight'.format(key)][:,sPrune:ePrune] = module._parameters['weight'][:,sOrig:eOrig]
+    
+    wtu.pModel['{}.bias'.format(key)] = module._parameters['bias']
+
+    wtu.ipChannelsPruned = []
+    wtu.prevLayer = modName
 #}}}
 #}}}
 
