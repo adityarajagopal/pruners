@@ -31,9 +31,6 @@ class ResNet20PruningDependency(BasicPruning):
             self.fileName = 'resnet{}_{}.py'.format(int(params.depth), int(params.pruner['pruning_perc']))
             self.netName = 'ResNet{}'.format(int(params.depth))
 
-        if eval(params.pruner['prune_layers']) == True: 
-            self.fileName = f"{self.fileName.split('.')[0]}_layerprune.py"
-        
         super().__init__(params, model)
     #}}}
     
@@ -150,7 +147,6 @@ class ResNet20PruningDependency(BasicPruning):
         numChannelsInDependencyGroup = [len(localRanking[k[0]]) for k in externalDeps]
         
         groupHeadPruneLimit = (1.0-pl) if pl <= 0.5 else pl
-        # groupPruningLimits = [int(math.ceil(0.3 * gs)) for gs in numChannelsInDependencyGroup]
         groupPruningLimits = [[int(math.ceil(groupHeadPruneLimit * gs)) if i==0\
                 else int(math.ceil(0.3 * gs)) for i,_ in enumerate(externalDeps[j])]\
                 for j,gs in enumerate(numChannelsInDependencyGroup)]
@@ -277,11 +273,7 @@ class ResNet20PruningDependency(BasicPruning):
             print("Pruned model written to {}".format(self.filePath))
         channelsPruned = {l:len(v) for l,v in self.channelsToPrune.items()}
         
-        if 'googlenet' in self.params.arch:
-            self.writer = GoogLeNetWriter(self.netName, channelsPruned, self.depBlock, self.filePath,\
-                    self.layerSizes)
-        else:
-            self.writer = Writer(self.netName, channelsPruned, self.depBlock, self.filePath, self.layerSizes)
+        self.writer = Writer(self.netName, channelsPruned, self.depBlock, self.filePath, self.layerSizes)
         
         lTypes, lNames = zip(*self.depBlock.linkedModules)
         prunedModel = copy.deepcopy(self.model)

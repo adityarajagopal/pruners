@@ -49,6 +49,8 @@ class BasicPruning(ABC):
         self.layerSizes = {}
         
         # create model directory and file
+        if eval(params.pruner['prune_layers']) == True: 
+            self.fileName = f"{self.fileName.split('.')[0]}_layerprune.py"
         self.dirName = '{}/{}/{}'.format(params.pruner['model_path'], params.dataset,\
                 params.pruner['subset_name'])
         self.filePath = os.path.join(self.dirName, self.fileName)
@@ -550,7 +552,8 @@ class BasicPruning(ABC):
             self.wtu = GoogLeNetWeightTransferUnit(self, pModStateDict, self.channelsToPrune, self.depBlock,\
                     self.layerSizes)
         else:
-            self.wtu = WeightTransferUnit(self, pModStateDict, self.channelsToPrune, self.depBlock, self.layerSizes)
+            self.wtu = WeightTransferUnit(self, pModStateDict, self.channelsToPrune, self.depBlock,\
+                    self.layerSizes)
         
         mutableOModel = copy.deepcopy(oModel)
         for n,m in mutableOModel.named_modules(): 
