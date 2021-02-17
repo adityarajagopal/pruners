@@ -14,6 +14,8 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 
+from base import BasicPruning
+
 class MobileNetV2PruningDependency(BasicPruning):
     def __init__(self, params, model):
     #{{{
