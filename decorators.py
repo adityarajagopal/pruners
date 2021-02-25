@@ -47,6 +47,17 @@ def ofa_global_average_pool(**kwargs):
     return decorator
 #}}}
 
+def se_residual(**kwargs):
+#{{{
+    def decorator(block): 
+        check_kwargs(**kwargs)
+        dependencies.SEResidualDependencyBlock.update_block_names(block, **kwargs)
+        dependencies.SEResidualDependencyBlock.register_dependency_calculator(block, kwargs['lType'],\
+                dependencies.SEResidual())
+        return block
+    return decorator
+#}}}
+
 def mb_conv(**kwargs):
 #{{{
     def decorator(block): 

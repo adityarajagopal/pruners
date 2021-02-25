@@ -31,7 +31,7 @@ import torch.nn as nn
 import src.adapt.lego.utils as utils
 
 class BasicPruning(ABC):
-    def __init__(self, params, model, verbose=False):
+    def __init__(self, params, model, depBlock=None, verbose=False):
     #{{{
         self.params = params
         self.model = model
@@ -59,7 +59,7 @@ class BasicPruning(ABC):
         cmd = 'mkdir -p {}'.format(self.dirName)
         subprocess.check_call(cmd, shell=True)
 
-        self.depBlock = dependSrc.DependencyBlock(model)
+        self.depBlock = dependSrc.DependencyBlock(model) if depBlock is None else depBlock
         self.get_layer_params()
 
         self.importPath = '{}.{}.{}'.format('.'.join(params.pruner['project_dir'].split('/')),\
@@ -67,22 +67,9 @@ class BasicPruning(ABC):
     #}}} 
     
     def get_layer_params(self):
-    #{{{
-        for p in self.model.named_parameters():
-            paramsInLayer = 1
-            for dim in p[1].size():
-                paramsInLayer *= dim
-            self.totalParams += paramsInLayer
-        
-        self.notPruned = 0
-        for n,m in self.model.named_modules(): 
-            if self.is_conv_or_fc(m): 
-                sizes = list(m._parameters['weight'].size())
-                self.layerSizes["{}".format(n)] = sizes
-            else: 
-                if m._parameters:
-                    self.notPruned += np.prod(m._parameters['weight'].size())
-    #}}}
+        self.layerSizes = {n: list(m.weight.shape) for n,m in self.model.named_modules()\
+                if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear)}
+        self.totalParams = sum([np.prod(p.shape) for p in self.model.parameters()])
 
     def log_pruned_channels(self, rootFolder, params, totalPrunedPerc, channelsPruned): 
     #{{{
