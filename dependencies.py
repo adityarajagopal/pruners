@@ -854,6 +854,192 @@ class SEResidualDependencyBlock(DependencyBlock):
         return layersToPrune
     #}}}
     
+    # def layers_to_prune(self): 
+    # #{{{
+    #     layersToPrune = {}
+    #     for n,m in self.model.named_modules(): 
+    #         if isinstance(m, nn.Conv2d) and 'downsample' not in n:
+    #             layersToPrune.update({n:m})
+    #     return layersToPrune
+    # #}}}
+    
+    def get_dependencies(self):
+    #{{{
+        internalDeps= []
+        externalDeps= []
+        externalDepGroup = 0
+        #TODO: Let linkedModules also have module instance so that here we can remove the tmp list below
+        linkedModules = [x for x in self.linkedModulesWithFc if not isinstance(x[2], nn.Linear)]
+        for i, (n, _, m) in enumerate(linkedModules):
+            modDetails = self.moduleDetails[type(m)]
+            
+            internallyDep, depLayers = self.depCalcs[type(m)].internal_dependency(m, modDetails)
+            if internallyDep:
+                internalDeps.append([f"{n}.{x}" for x in depLayers])
+
+            externallyDep, depLayers = self.depCalcs[type(m)].external_dependency(m, modDetails)
+            if externallyDep:
+                if depLayers is not None:
+                    depLayers = [f"{n}.{x}" for x in depLayers]
+                    if len(externalDeps) == externalDepGroup:
+                        # new chain of externally dependent convs
+                        # start of chain is previous layer to current layers
+                        prevModName, _, prevMod = linkedModules[i-1]
+                        prevModDetails = self.moduleDetails[type(prevMod)]
+                        prevLayers = self.depCalcs[type(prevMod)].dependent_conv(prevModName, prevModDetails)
+                        externalDeps.append([*prevLayers, *depLayers])
+                    else:
+                        externalDeps[externalDepGroup] += depLayers
+            else:
+                if len(externalDeps) == externalDepGroup + 1:
+                    externalDepGroup += 1
+        
+        return internalDeps, externalDeps
+    #}}}
+#}}}
+
+class ResidualDependencyBlock(DependencyBlock):
+#{{{
+    def __init__(self, model):
+    #{{{
+        self.model = model
+        
+        try:
+            self.instances = list(self.moduleDetails.keys())
+            self.convs = self.dependentLayers['conv']
+            self.dsLayers = self.dependentLayers['downsample']
+        except AttributeError: 
+            logging.warning(\
+                "Instantiating dependency block without decorators on model or for class without dependencies")
+
+        if hasattr(self, 'depCalcs'):
+            self.depCalcs[nn.Conv2d] = SEBasicConv()
+            self.depCalcs[nn.Linear] = SELinear()
+        else: 
+            self.depCalcs = {nn.Conv2d: SEBasicConv(), nn.Linear: SELinear()}
+
+        if hasattr(self, 'moduleDetails'): 
+            self.moduleDetails[nn.Conv2d] = None 
+            self.moduleDetails[nn.Linear] = None 
+        else:
+            self.moduleDetails = {nn.Conv2d: None, nn.Linear: None}
+        
+        self.linkedModules, self.linkedModulesWithFc = self.create_modules_graph()
+        self.linkedConvAndFc, self.linkedConvs = self.create_layer_graph()
+        self.layersToPrune = self.layers_to_prune()
+    #}}}
+    
+    @classmethod
+    def update_block_names(cls, blockInst, **kwargs):
+    #{{{
+        assert all(x in kwargs.keys() for x in ['lType', 'convs', 'downsampling']), ("Required keys "\
+                f"(lType, convs, downsampling) missing in kwargs ({kwargs.keys()})")
+        lType = kwargs['lType']
+        convs = kwargs['convs']
+        ds = kwargs['downsampling']
+        
+        if hasattr(cls, 'dependentLayers'):
+            cls.dependentLayers['instance'].append(blockInst)
+            cls.dependentLayers['conv'].append(convs)
+            cls.dependentLayers['downsample'].append(ds)
+        else:
+            setattr(cls, 'dependentLayers', {'type':[lType], 'instance':[blockInst], 'conv':[convs],\
+                    'downsample':[ds]})
+
+        #NOTE: new code to potentially revamp the original to not have lists but dictionaries where it 
+        #makes sense
+        if hasattr(cls, 'moduleDetails'):
+            cls.moduleDetails[blockInst] = kwargs
+        else:
+            setattr(cls, 'moduleDetails', {blockInst:kwargs})
+    #}}}
+
+    @classmethod 
+    def register_dependency_calculator(cls, blockInst, blockName, calcFunc):
+    #{{{
+        if hasattr(cls, 'depCalcs'): 
+            cls.depCalcs[blockName] = calcFunc
+        else: 
+            setattr(cls, 'depCalcs', {blockName: calcFunc})
+
+        #NOTE: new code to potentially revamp the original to not have lists but dictionaries where it 
+        #makes sense
+        if hasattr(cls, 'depCalcs'): 
+            cls.depCalcs[blockInst] = calcFunc
+        else: 
+            setattr(cls, 'depCalcs', {blockInst: calcFunc})
+    #}}}
+
+    def create_modules_graph(self): 
+    #{{{
+        """
+        Returns a list which has order of modules which have an instance of module in instances
+        in the entire network eg. conv1 -> module1(which has as an mb_conv) -> conv2 -> module2 ...    
+        """
+        linkedConvModules = []
+        linkedModules = []
+            
+        parentModule = None
+        for n,m in self.model.named_modules(): 
+            if self.check_inst(m, self.instances):
+                parentModule = n
+                mType = self.moduleDetails[type(m)]['lType']
+                linkedConvModules.append((mType, n))
+                linkedModules.append((n, mType, m))
+
+            elif isinstance(m, nn.Conv2d):
+                if parentModule is None or f"{parentModule}." not in n:
+                    linkedConvModules.append(('basic', n))
+                    linkedModules.append((n, 'basic', m))
+
+            elif isinstance(m, nn.Linear): 
+                if parentModule is None or f"{parentModule}." not in n:
+                    linkedModules.append((n, 'linear', m))
+
+        return linkedConvModules, linkedModules
+    #}}}
+    
+    def create_layer_graph(self): 
+    #{{{
+        """
+        Returns a list which has connectivity between all convs and FCs in the network 
+        """
+        linkedLayers = {}
+        linkedConvs = {}
+        for i in range(len(self.linkedModulesWithFc)-1):
+            mName, mType, m = self.linkedModulesWithFc[i]
+            mNextName, mNextType, mNext = self.linkedModulesWithFc[i+1]
+            
+            connected = self.depCalcs[type(m)].get_internal_connections(mName, m, self.moduleDetails[type(m)])
+            connectedTo = self.depCalcs[type(mNext)].get_interface_layers(mNextName, mNext,
+                    self.moduleDetails[type(mNext)])
+            
+            for k,v in connected.items(): 
+                if v == []: 
+                    connected[k] = connectedTo
+            
+            linkedLayers.update(connected)
+            if not isinstance(m, nn.Linear):
+                linkedConvs.update(connected)
+        
+        return linkedLayers, linkedConvs
+    #}}}
+    
+    def layers_to_prune(self): 
+    #{{{
+        layersToPrune = {}
+        dsLayerIds = None
+        for n,m in self.model.named_modules(): 
+            if self.check_inst(m, self.instances): 
+                dsLayerIds = self.moduleDetails[type(m)]['downsampling']
+            
+            if isinstance(m, nn.Conv2d):
+                if dsLayerIds is not None and any(x in n for x in dsLayerIds):
+                    continue
+                layersToPrune.update({n:m})
+        return layersToPrune
+    #}}}
+    
     def get_dependencies(self):
     #{{{
         internalDeps= []

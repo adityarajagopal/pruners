@@ -196,16 +196,9 @@ class BasicPruning(ABC):
     #}}}
     
     def prune_rate(self, pModel):
-    #{{{
-        prunedParams = 0
-        for p in pModel.named_parameters():
-            params = 1
-            for dim in p[1].size():
-                params *= dim 
-            prunedParams += params
-        
-        return 100.*((self.totalParams - prunedParams) / self.totalParams), (prunedParams * 4) / 1e6, (self.totalParams * 4)/1e6
-    #}}}        
+        prunedParams = sum([np.prod(p.shape) for p in pModel.parameters()])
+        return 100.*((self.totalParams - prunedParams) / self.totalParams), (prunedParams * 4) / 1e6,\
+                (self.totalParams * 4)/1e6
     
     def inc_prune_rate(self, layerName):
     #{{{
