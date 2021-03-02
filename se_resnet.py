@@ -42,23 +42,53 @@ class SEResNetPruning(BasicPruning):
         super().__init__(params, model, depBlock=depBlock)
     #}}}
     
-    def prune_model(self, inplace=False):
+    def prune_model(self, inplace=False, scales=None):
     #{{{
-        # pruning based on l1 norm of weights
         if self.params.pruner['mode'] == 'l1-norm':
             logging.info(f"Pruning filters: l1-norm - Pruning Level {self.params.pruner['pruning_perc']}")
             self.calculate_metric = self.l1_norm
-            self.model = self.model if inplace else copy.deepcopy(self.model)
-            channelsPruned = self.structured_l1_weight()
-            newModelParams = sum([np.prod(p.shape) for p in self.model.parameters()])
-            pruneRate = 100. * (1. - (newModelParams/self.totalParams))
-            logging.info((f"Pruned Percentage = {pruneRate:.2f}%, "
-                          f"New Model Size = {newModelParams*4/1e6:.2f} MB, "
-                          f"Orig Model Size = {self.totalParams*4/1e6:.2f} MB"))
-            return channelsPruned, self.model 
+        
+        elif self.params.pruner['mode'] == 'se_scales':
+            logging.info(f"Pruning filters: se_scales - Pruning Level {self.params.pruner['pruning_perc']}")
+            assert scales is not None
+            self.seScales = scales
+            self.calculate_metric = self.se_scales
+
+        else:
+            raise ValueError(f"Unrecognised mode {self.params.pruner['mode']}")
+            
+        self.model = self.model if inplace else copy.deepcopy(self.model)
+        channelsPruned = self.structured_prune()
+        newModelParams = sum([np.prod(p.shape) for p in self.model.parameters()])
+        pruneRate = 100. * (1. - (newModelParams/self.totalParams))
+        logging.info((f"Pruned Percentage = {pruneRate:.2f}%, "
+                      f"New Model Size = {newModelParams*4/1e6:.2f} MB, "
+                      f"Orig Model Size = {self.totalParams*4/1e6:.2f} MB"))
+        return channelsPruned, self.model 
      #}}}
     
-    def structured_l1_weight(self):
+    def l1_norm(self, conv, module):
+    #{{{
+        layer = dict(self.model.named_modules())[conv]
+        param = layer.weight.data.numpy()
+        metric = np.absolute(param).reshape(param.shape[0], -1).sum(axis=1)
+        metric /= (param.shape[1]*param.shape[2]*param.shape[3])
+        return metric
+    #}}}
+    
+    def se_scales(self, conv, module):
+    #{{{
+        seDetails = self.depBlock.moduleDetails[type(module)]['se']
+        for k,v in seDetails.items(): 
+            if k in conv:
+                moduleName = conv.split(k)[0]
+                scales = self.seScales[f"{moduleName}{v}"]
+                break
+        metric = scales.mean(axis=0)
+        return metric
+    #}}}
+    
+    def structured_prune(self):
     #{{{
         localRanking, globalRanking = self.rank_filters()
         
@@ -75,15 +105,6 @@ class SEResNetPruning(BasicPruning):
         self.remove_filters(localRanking, globalRanking, dependencies, minChannelsKept)
 
         return self.channelsToPrune
-    #}}}
-    
-    def l1_norm(self, conv, module):
-    #{{{
-        layer = dict(self.model.named_modules())[conv]
-        param = layer.weight.data.numpy()
-        metric = np.absolute(param).reshape(param.shape[0], -1).sum(axis=1)
-        metric /= (param.shape[1]*param.shape[2]*param.shape[3])
-        return metric
     #}}}
     
     def rank_filters(self):

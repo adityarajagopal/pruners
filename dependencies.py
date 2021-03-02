@@ -854,15 +854,6 @@ class SEResidualDependencyBlock(DependencyBlock):
         return layersToPrune
     #}}}
     
-    # def layers_to_prune(self): 
-    # #{{{
-    #     layersToPrune = {}
-    #     for n,m in self.model.named_modules(): 
-    #         if isinstance(m, nn.Conv2d) and 'downsample' not in n:
-    #             layersToPrune.update({n:m})
-    #     return layersToPrune
-    # #}}}
-    
     def get_dependencies(self):
     #{{{
         internalDeps= []
