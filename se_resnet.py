@@ -29,7 +29,7 @@ class SEResNetPruning(BasicPruning):
     def __init__(self, params, model):  
     #{{{
         logging.info("Initialising SEResNet Pruning")
-        if params.seNet is not None and params.seNet['task'] == 'prune_and_retrain': 
+        if params.seNet is not None: 
             self.fileName = '{}_{}.py'.format(params.seNet['network'], params.pruner['pruning_perc'])
             self.netName = f"{params.seNet['network'].capitalize()}"
         else:
@@ -41,7 +41,7 @@ class SEResNetPruning(BasicPruning):
 
         super().__init__(params, model, depBlock=depBlock)
     #}}}
-    
+
     def prune_model(self, inplace=False, scales=None):
     #{{{
         if self.params.pruner['mode'] == 'l1-norm':
@@ -57,14 +57,15 @@ class SEResNetPruning(BasicPruning):
         else:
             raise ValueError(f"Unrecognised mode {self.params.pruner['mode']}")
             
-        self.model = self.model if inplace else copy.deepcopy(self.model)
+        # self.model = self.model if inplace else copy.deepcopy(self.model)
         channelsPruned = self.structured_prune()
         newModelParams = sum([np.prod(p.shape) for p in self.model.parameters()])
         pruneRate = 100. * (1. - (newModelParams/self.totalParams))
         logging.info((f"Pruned Percentage = {pruneRate:.2f}%, "
                       f"New Model Size = {newModelParams*4/1e6:.2f} MB, "
                       f"Orig Model Size = {self.totalParams*4/1e6:.2f} MB"))
-        return channelsPruned, self.model 
+        
+        return channelsPruned, self.model
      #}}}
     
     def l1_norm(self, conv, module):
@@ -139,13 +140,13 @@ class SEResNetPruning(BasicPruning):
     
     def remove_filters(self, localRanking, globalRanking, dependencies, minChannelsKept):
     #{{{
-        [m.register_buffer('wMask', torch.ones_like(m.weight), persistent=False)\
+        [m.register_buffer('wMask', torch.ones_like(m.weight), persistent=True)\
                 for n,m in self.model.named_modules() if self.conv_or_fc(m)]
-        [m.register_buffer('wShape', torch.tensor(m.weight.shape),persistent=False)\
+        [m.register_buffer('wShape', torch.tensor(m.weight.shape),persistent=True)\
                 for n,m in self.model.named_modules() if self.conv_or_fc(m)]
-        [m.register_buffer('bMask', torch.ones_like(m.bias), persistent=False)\
+        [m.register_buffer('bMask', torch.ones_like(m.bias), persistent=True)\
                 for n,m in self.model.named_modules() if self.conv_or_fc(m) and m.bias is not None]
-        [m.register_buffer('bShape', torch.tensor(m.bias.shape), persistent=False)\
+        [m.register_buffer('bShape', torch.tensor(m.bias.shape), persistent=True)\
                 for n,m in self.model.named_modules() if self.conv_or_fc(m) and m.bias is not None]
         
         listIdx = 0

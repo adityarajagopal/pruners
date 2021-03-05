@@ -21,10 +21,17 @@ def residual(**kwargs):
         dependencies.ResidualDependencyBlock.update_block_names(block, **kwargs)
         dependencies.ResidualDependencyBlock.register_dependency_calculator(block, kwargs['lType'],\
                 dependencies.SEResidual())
-        # dependencies.DependencyBlock.update_block_names(block, **kwargs)
-        # dependencies.DependencyBlock.register_dependency_calculator(kwargs['lType'], dependencies.Residual())
-        # writers.Writer.register_writer(kwargs['lType'], writers.residual)
-        # weight_transfer.WeightTransferUnit.register_transfer_func(kwargs['lType'], weight_transfer.residual)
+        return block
+    return decorator
+#}}}
+
+def se_residual(**kwargs):
+#{{{
+    def decorator(block): 
+        check_kwargs(**kwargs)
+        dependencies.SEResidualDependencyBlock.update_block_names(block, **kwargs)
+        dependencies.SEResidualDependencyBlock.register_dependency_calculator(block, kwargs['lType'],\
+                dependencies.SEResidual())
         return block
     return decorator
 #}}}
@@ -46,17 +53,6 @@ def ofa_global_average_pool(**kwargs):
     def decorator(block): 
         writers.Writer.register_writer(block.__name__.lower(), writers.ofa_adaptiveavgpool2d)
         weight_transfer.WeightTransferUnit.register_transfer_func(block.__name__.lower(), weight_transfer.ofa_adaptiveavgpool2d)
-        return block
-    return decorator
-#}}}
-
-def se_residual(**kwargs):
-#{{{
-    def decorator(block): 
-        check_kwargs(**kwargs)
-        dependencies.SEResidualDependencyBlock.update_block_names(block, **kwargs)
-        dependencies.SEResidualDependencyBlock.register_dependency_calculator(block, kwargs['lType'],\
-                dependencies.SEResidual())
         return block
     return decorator
 #}}}
