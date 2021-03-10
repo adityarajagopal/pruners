@@ -1,7 +1,7 @@
 import sys
 
-import dependencies as dependencies
 import model_writers as writers
+import dependencies as dependencies
 import weight_transfer as weight_transfer
 
 def check_kwargs(**kwargs): 
