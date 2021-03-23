@@ -29,11 +29,8 @@ class ResNetPruning(BasicPruning):
     def __init__(self, params, model):  
     #{{{
         logging.info("Initialising ResNet Pruning")
-        if params.seNet is not None and params.seNet['task'] == 'prune_and_retrain': 
-            self.fileName = '{}_{}.py'.format(params.seNet['network'], params.pruner['pruning_perc'])
-            self.netName = f"{params.seNet['network'].capitalize()}"
-        else:
-            raise ValueError("Could not fine se_net section in params file")
+        self.dirName = ''
+        self.fileName = ''
         
         self.conv_or_fc = lambda m : (isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear))
         
@@ -42,7 +39,7 @@ class ResNetPruning(BasicPruning):
         super().__init__(params, model, depBlock=depBlock)
     #}}}
     
-    def prune_model(self, inplace=False):
+    def prune_model(self, inplace=False, scales=None):
     #{{{
         unprunedModel = None if inplace else copy.deepcopy(self.model) 
         # pruning based on l1 norm of weights
@@ -129,13 +126,13 @@ class ResNetPruning(BasicPruning):
     
     def remove_filters(self, localRanking, globalRanking, dependencies, minChannelsKept):
     #{{{
-        [m.register_buffer('wMask', torch.ones_like(m.weight), persistent=False)\
+        [m.register_buffer('wMask', torch.ones_like(m.weight), persistent=True)\
                 for n,m in self.model.named_modules() if self.conv_or_fc(m)]
-        [m.register_buffer('wShape', torch.tensor(m.weight.shape),persistent=False)\
+        [m.register_buffer('wShape', torch.tensor(m.weight.shape),persistent=True)\
                 for n,m in self.model.named_modules() if self.conv_or_fc(m)]
-        [m.register_buffer('bMask', torch.ones_like(m.bias), persistent=False)\
+        [m.register_buffer('bMask', torch.ones_like(m.bias), persistent=True)\
                 for n,m in self.model.named_modules() if self.conv_or_fc(m) and m.bias is not None]
-        [m.register_buffer('bShape', torch.tensor(m.bias.shape), persistent=False)\
+        [m.register_buffer('bShape', torch.tensor(m.bias.shape), persistent=True)\
                 for n,m in self.model.named_modules() if self.conv_or_fc(m) and m.bias is not None]
         
         listIdx = 0
@@ -145,6 +142,7 @@ class ResNetPruning(BasicPruning):
         self.prunableParams = sum([torch.prod(m.wShape) for n,m in self.model.named_modules()\
                 if self.conv_or_fc(m)])
         start= time.time()
+        
         while (currentPruneRate < float(self.params.pruner['pruning_perc'])) and (listIdx < len(globalRanking)):
             layerName, filterNum, _ = globalRanking[listIdx]
 
