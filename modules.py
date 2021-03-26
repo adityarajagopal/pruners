@@ -41,7 +41,7 @@ def conv_layer(pruner, layerName, filterNum, findBN=True):
             #NOTE:totalOpChannels only really needed for AlexNet as the first FC layer has a 6x6 
             #spatial input dimension to the FC, all other nets have 1x1
             totalOpChannels = sum([pruner.allModules[x].out_channels for x in parallelLayerNames])
-            spatialDims = int(nextLayer.in_features / totalOpChannels)
+            spatialDims = int(int(nextLayer.in_features) / int(totalOpChannels))
             nn_linear(nextLayer, filterNum, spatialDims)
 #}}}
 
