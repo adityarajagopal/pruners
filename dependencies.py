@@ -726,7 +726,7 @@ class ResidualDependencyBlock(DependencyBlock):
             self.instances = list(self.moduleDetails.keys())
             self.convs = self.dependentLayers['conv']
             self.dsLayers = self.dependentLayers['downsample']
-        except AttributeError: 
+        except AttributeError as e: 
             logging.warning(\
                 "Instantiating dependency block without decorators on model or for class without dependencies")
 
