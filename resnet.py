@@ -88,7 +88,7 @@ class ResNetPruning(BasicPruning):
     def l1_norm(self, conv, module):
     #{{{
         layer = dict(self.model.named_modules())[conv]
-        param = layer.weight.data.numpy()
+        param = layer.weight.data.cpu().numpy()
         metric = np.absolute(param).reshape(param.shape[0], -1).sum(axis=1)
         metric /= (param.shape[1]*param.shape[2]*param.shape[3])
         return metric
