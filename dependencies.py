@@ -723,7 +723,8 @@ class ResidualDependencyBlock(DependencyBlock):
         self.model = model
         
         try:
-            self.instances = list(self.moduleDetails.keys())
+            # self.instances = list(self.moduleDetails.keys())
+            self.instances = [k for k,v in self.moduleDetails.items() if v is not None]
             self.convs = self.dependentLayers['conv']
             self.dsLayers = self.dependentLayers['downsample']
         except AttributeError as e: 
