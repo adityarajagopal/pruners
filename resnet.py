@@ -226,7 +226,8 @@ class ResNet20PruningDependency(BasicPruning):
 #{{{
     def __init__(self, params, model):  
     #{{{
-        if params.ofa is not None and params.ofa['task'] == 'prune_and_retrain': 
+        if params.ofa is not None and (params.ofa['task'] == 'prune_and_retrain' or\
+                params.ofa['task'] == 'get_model_predictions'): 
             self.fileName = 'ofa_{}_{}.py'.format(params.ofa['network'], params.pruner['pruning_perc'])
             self.netName = f"OFA{params.ofa['network'].capitalize()}"
         else:
