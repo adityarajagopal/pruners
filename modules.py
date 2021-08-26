@@ -4,20 +4,31 @@ import torch.nn as nn
 def nn_conv(layer, filterNum, opFilter):
 #{{{
     if opFilter:
-        layer.wShape[0] -= 1
         layer.wMask[filterNum] = 0
+        if layer.groups != 1:
+            oc = int(layer.wMask.sum().div(layer.wShape[2]**2))
+            layer.groups = oc
+            layer.wShape[0] = oc
+        else:
+            layer.wShape[0] -= 1
         if layer.bias is not None:
             layer.bShape[0] -= 1
             layer.bMask[filterNum] = 0
     else:
-        layer.wShape[1] -= 1
-        layer.wMask[:,filterNum,:,:] = 0
+        if layer.groups == 1:
+            layer.wShape[1] -= 1
+            layer.wMask[:,filterNum,:,:] = 0
+        else:
+            layer.wMask[filterNum] = 0 
+            oc = int(layer.wMask.sum().div(layer.wShape[2]**2))
+            layer.groups = oc
+            layer.wShape[0] = oc
 #}}}
 
 def nn_linear(layer, filterNum, spatialDims):
 #{{{
     layer.wShape[1] -= spatialDims
-    idx = [filterNum+i for i in range(spatialDims)]
+    idx = [(filterNum*spatialDims)+i for i in range(spatialDims)]
     layer.wMask[:,idx] = 0
 #}}}
 
